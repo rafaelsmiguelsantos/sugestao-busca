@@ -1,0 +1,142 @@
+[
+  { "termo": "antecipação de limite", "jornada": "credito", "produto": "ANTECIPACAO",
+    "sinonimo": ["adiantar dinheiro", "adiantar limite", "antecipar limite", "dinheiro adiantado", "adiantamento"],
+    "gatilho": ["pix_recusado_72h", "saldo_insuficiente_24h"], "adesao": 0.31, "ctr": 0.22,
+    "rotulo": "pela sua última tentativa de Pix" },
+
+  { "termo": "empréstimo pessoal", "jornada": "credito", "produto": "EMPRESTIMO",
+    "sinonimo": ["pegar dinheiro emprestado", "emprestimo", "credito pessoal", "preciso de dinheiro"],
+    "gatilho": ["pix_recusado_72h", "simulacao_abandonada_24h"], "adesao": 0.18, "ctr": 0.26 },
+
+  { "termo": "crédito consignado", "jornada": "credito", "produto": "CONSIGNADO",
+    "sinonimo": ["consignado", "emprestimo com desconto em folha", "credito com desconto"],
+    "elegibilidade": true, "adesao": 0.24, "ctr": 0.19 },
+
+  { "termo": "financiamento de veículo", "jornada": "credito", "produto": "FINANCIAMENTO_VEICULO",
+    "sinonimo": ["financiar carro", "carro", "veiculo", "comprar carro", "financiamento veiculo"],
+    "elegibilidade": true, "adesao": 0.12, "ctr": 0.21 },
+
+  { "termo": "financiamento imobiliário", "jornada": "credito", "produto": "FINANCIAMENTO_IMOVEL",
+    "sinonimo": ["financiar imovel", "comprar casa", "credito imobiliario", "casa propria"],
+    "elegibilidade": true, "adesao": 0.07, "ctr": 0.17 },
+
+  { "termo": "parcelar fatura do cartão", "jornada": "cartao", "produto": "PARCELAMENTO_FATURA",
+    "sinonimo": ["parcelar fatura", "dividir fatura", "nao consigo pagar a fatura"],
+    "gatilho": ["fatura_alta_7d"], "adesao": 0.28, "ctr": 0.31 },
+
+  { "termo": "aumentar limite do cartão", "jornada": "cartao", "produto": "LIMITE_CARTAO",
+    "sinonimo": ["aumentar limite", "limite do cartao", "mais limite"],
+    "elegibilidade": true, "adesao": 0.14, "ctr": 0.35 },
+
+  { "termo": "segunda via do cartão", "tipo": "acao", "jornada": "cartao",
+    "sinonimo": ["2a via do cartao", "cartao novo", "perdi o cartao", "cartao clonado"],
+    "adesao": 0.41, "ctr": 0.52 },
+
+  { "termo": "desbloquear cartão", "tipo": "acao", "jornada": "cartao",
+    "sinonimo": ["ativar cartao", "cartao bloqueado", "liberar cartao"], "adesao": 0.47, "ctr": 0.58 },
+
+  { "termo": "fatura do cartão", "tipo": "acao", "jornada": "cartao",
+    "sinonimo": ["ver fatura", "minha fatura", "quanto devo no cartao"], "adesao": 0.39, "ctr": 0.61 },
+
+  { "termo": "limite do Pix", "tipo": "acao", "jornada": "pix",
+    "sinonimo": ["limite pix", "aumentar limite do pix", "mudar limite pix"], "adesao": 0.36, "ctr": 0.44 },
+
+  { "termo": "cadastrar chave Pix", "tipo": "acao", "jornada": "pix",
+    "sinonimo": ["criar chave pix", "chave pix", "registrar chave"], "adesao": 0.44, "ctr": 0.49 },
+
+  { "termo": "Pix agendado", "tipo": "acao", "jornada": "pix",
+    "sinonimo": ["agendar pix", "pix programado", "pix para depois"], "adesao": 0.27, "ctr": 0.33 },
+
+  { "termo": "comprovante de Pix", "tipo": "acao", "jornada": "pix",
+    "sinonimo": ["comprovante", "segunda via do comprovante", "recibo do pix"], "adesao": 0.33, "ctr": 0.55 },
+
+  { "termo": "CDB", "jornada": "investimento", "produto": "CDB",
+    "sinonimo": ["cdb", "renda fixa", "onde investir", "aplicar dinheiro"], "adesao": 0.16, "ctr": 0.24 },
+
+  { "termo": "Tesouro Direto", "jornada": "investimento", "produto": "TESOURO",
+    "sinonimo": ["tesouro", "titulo publico", "tesouro selic"], "adesao": 0.11, "ctr": 0.20 },
+
+  { "termo": "LCI e LCA", "jornada": "investimento", "produto": "LCI",
+    "sinonimo": ["lci", "lca", "investimento isento"], "adesao": 0.09, "ctr": 0.15 },
+
+  { "termo": "rendimento da poupança", "tipo": "acao", "jornada": "investimento",
+    "sinonimo": ["quanto rende a poupanca", "poupanca", "rendimento"], "adesao": 0.21, "ctr": 0.29 },
+
+  { "termo": "extrato da conta", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["ver extrato", "extrato", "movimentacao da conta"], "adesao": 0.42, "ctr": 0.63 },
+
+  { "termo": "saldo da conta", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["meu saldo", "quanto tenho", "consultar saldo"], "adesao": 0.46, "ctr": 0.68 },
+
+  { "termo": "transferência TED", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["ted", "transferir para outro banco", "transferencia"], "adesao": 0.30, "ctr": 0.38 },
+
+  { "termo": "pagar boleto", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["boleto", "pagamento de boleto", "codigo de barras"], "adesao": 0.43, "ctr": 0.59 },
+
+  { "termo": "portabilidade de salário", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["trazer meu salario", "portabilidade", "receber salario aqui"],
+    "elegibilidade": true, "adesao": 0.13, "ctr": 0.18 },
+
+  { "termo": "informe de rendimentos", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["imposto de renda", "informe", "declaracao do banco", "ir"], "adesao": 0.38, "ctr": 0.57 },
+
+  { "termo": "seguro de vida", "jornada": "seguros", "produto": "SEGURO_VIDA",
+    "sinonimo": ["seguro", "protecao familiar"], "adesao": 0.08, "ctr": 0.12 },
+
+  { "termo": "seguro do celular", "jornada": "seguros", "produto": "SEGURO_CELULAR",
+    "sinonimo": ["proteger celular", "seguro telefone", "celular roubado"], "adesao": 0.15, "ctr": 0.23 },
+
+  { "termo": "bloquear conta por roubo", "tipo": "acao", "jornada": "seguranca",
+    "sinonimo": ["fui roubado", "bloquear tudo", "celular roubado", "me roubaram"],
+    "gatilho": ["acesso_suspeito_24h"], "adesao": 0.52, "ctr": 0.66,
+    "rotulo": "ação imediata" },
+
+  { "termo": "contestar compra", "tipo": "acao", "jornada": "seguranca",
+    "sinonimo": ["nao reconheco a compra", "compra que nao fiz", "estorno"],
+    "gatilho": ["contestacao_aberta_7d"], "adesao": 0.35, "ctr": 0.47 },
+
+  { "termo": "antecipação de recebíveis", "jornada": "pj", "produto": "ANTECIPACAO_PJ",
+    "sinonimo": ["antecipar recebiveis", "antecipar vendas", "receber antes", "adiantar vendas"],
+    "gatilho": ["recebivel_disponivel_24h"], "adesao": 0.29, "ctr": 0.34,
+    "segmento": ["PJ"], "rotulo": "você tem recebíveis disponíveis" },
+
+  { "termo": "taxa da maquininha", "tipo": "acao", "jornada": "pj",
+    "sinonimo": ["taxa maquininha", "quanto custa a maquininha", "tarifas da maquininha"],
+    "segmento": ["PJ"], "adesao": 0.25, "ctr": 0.40 },
+
+  { "termo": "capital de giro", "jornada": "pj", "produto": "CAPITAL_GIRO",
+    "sinonimo": ["emprestimo para empresa", "credito pj", "dinheiro para a empresa"],
+    "segmento": ["PJ"], "elegibilidade": true, "adesao": 0.19, "ctr": 0.22 },
+
+  { "termo": "emitir boleto", "tipo": "acao", "jornada": "pj",
+    "sinonimo": ["gerar boleto", "cobrar cliente", "boleto para cliente"],
+    "segmento": ["PJ"], "adesao": 0.40, "ctr": 0.51 },
+
+  { "termo": "conta PJ", "jornada": "pj", "produto": "CONTA_PJ",
+    "sinonimo": ["abrir conta empresa", "conta empresarial", "conta para cnpj"],
+    "segmento": ["PJ"], "adesao": 0.17, "ctr": 0.20 },
+
+  { "termo": "como funciona o consignado", "tipo": "entidade", "jornada": "ajuda",
+    "sinonimo": ["duvida consignado", "entender consignado", "o que e consignado"],
+    "adesao": 0.05, "ctr": 0.28 },
+
+  { "termo": "o que é CET", "tipo": "entidade", "jornada": "ajuda",
+    "sinonimo": ["custo efetivo total", "cet", "juros totais"], "adesao": 0.03, "ctr": 0.19 },
+
+  { "termo": "como antecipar o limite", "tipo": "entidade", "jornada": "ajuda",
+    "sinonimo": ["entender antecipacao", "duvida antecipacao", "como funciona adiantar"],
+    "gatilho": ["pix_recusado_72h"], "adesao": 0.06, "ctr": 0.30 },
+
+  { "termo": "tarifas da conta", "tipo": "entidade", "jornada": "ajuda",
+    "sinonimo": ["quanto pago de tarifa", "tarifa", "custo da conta"], "adesao": 0.04, "ctr": 0.25 },
+
+  { "termo": "atualizar cadastro", "tipo": "acao", "jornada": "conta",
+    "sinonimo": ["mudar endereco", "atualizar dados", "trocar telefone"], "adesao": 0.34, "ctr": 0.45 },
+
+  { "termo": "cartão virtual", "tipo": "acao", "jornada": "cartao",
+    "sinonimo": ["cartao temporario", "comprar na internet", "cartao online"], "adesao": 0.37, "ctr": 0.43 },
+
+  { "termo": "programa de pontos", "tipo": "entidade", "jornada": "cartao",
+    "sinonimo": ["pontos", "milhas", "trocar pontos"], "adesao": 0.22, "ctr": 0.36 }
+]

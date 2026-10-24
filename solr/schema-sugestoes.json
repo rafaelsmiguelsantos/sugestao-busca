@@ -49,7 +49,7 @@
   "add-field": [
     { "name": "termo",          "type": "string",          "indexed": true,  "stored": true,  "docValues": true },
     { "name": "termo_prefixo",  "type": "prefixo_frase",   "indexed": true,  "stored": false },
-    { "name": "termo_infixo",   "type": "prefixo_palavra", "indexed": true,  "stored": false },
+    { "name": "termo_infixo",   "type": "prefixo_palavra", "indexed": true,  "stored": false, "multiValued": true },
     { "name": "sinonimo",       "type": "prefixo_palavra", "indexed": true,  "stored": true,  "multiValued": true },
 
     { "name": "tipo",           "type": "string",  "indexed": true,  "stored": true },

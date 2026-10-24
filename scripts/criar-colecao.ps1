@@ -42,26 +42,30 @@ if (-not $pronto) {
     throw "Solr nao respondeu em $EsperaSegundos s. Suba com '.\scripts\solr-local.ps1 start' ou 'docker compose up -d'."
 }
 
-# --- 2. criar o core, se ainda nao existir ---------------------------------
+# --- 2. criar a colecao, se ainda nao existir ------------------------------
+# API de collections, nao de cores. O Solr 10 sobe em modo cloud por padrao —
+# o modo autogerido saiu — e nele 'admin/cores?action=CREATE' responde 400.
 $existe = $false
 try {
-    $st = Invoke-RestMethod -Uri "$BaseUrl/admin/cores?action=STATUS&core=$Colecao&wt=json" -TimeoutSec 15
-    if ($st.status.$Colecao.name) { $existe = $true }
+    $lista = Invoke-RestMethod -Uri "$BaseUrl/admin/collections?action=LIST&wt=json" -TimeoutSec 15
+    if ($lista.collections -contains $Colecao) { $existe = $true }
 } catch {
-    # Em modo cloud a API de cores responde diferente; tratamos como inexistente
-    # e deixamos o CREATE decidir.
+    throw "Nao consegui listar as colecoes: $($_.Exception.Message)"
 }
 
 if ($existe) {
     Write-Host "Colecao '$Colecao' ja existe."
 } else {
     Write-Host "Criando a colecao '$Colecao' a partir do configset _default..."
-    $url = "$BaseUrl/admin/cores?action=CREATE&name=$Colecao&configSet=_default&wt=json"
+    $url = "$BaseUrl/admin/collections?action=CREATE&name=$Colecao" +
+           "&numShards=1&replicationFactor=1&collection.configName=_default&wt=json"
     try {
-        Invoke-RestMethod -Uri $url -TimeoutSec 60 | Out-Null
+        Invoke-RestMethod -Uri $url -TimeoutSec 120 | Out-Null
         Write-Host "Criada."
     } catch {
-        throw "Falhou ao criar a colecao: $($_.Exception.Message)"
+        $detalhe = $_.ErrorDetails.Message
+        if (-not $detalhe) { $detalhe = $_.Exception.Message }
+        throw "Falhou ao criar a colecao: $detalhe"
     }
 }
 
