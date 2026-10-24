@@ -1,0 +1,40 @@
+# Solr 10 para o ambiente de desenvolvimento da camada de sugestao.
+#
+# Exige um runtime de container (Docker Desktop, Rancher ou Podman). Nesta maquina
+# nenhum esta instalado e o WSL tambem nao — veja README.md, secao "Solr em Docker".
+# Enquanto isso, scripts/solr-local.ps1 sobe o mesmo Solr 10.0.0 a partir do zip,
+# na mesma porta e com a mesma colecao. O schema e identico nos dois caminhos.
+#
+#   docker compose up -d
+#   pwsh scripts/criar-colecao.ps1
+#   docker compose down          # mantem o volume
+#   docker compose down -v       # descarta o indice
+
+services:
+  solr:
+    image: solr:10.0.0
+    container_name: sugestao-solr
+    ports:
+      # So localhost. Expor 0.0.0.0 abriria o Solr para a rede e dispararia
+      # o pedido de liberacao do firewall do Windows, que exige elevacao.
+      - "127.0.0.1:8983:8983"
+    environment:
+      SOLR_HEAP: 1g
+      # O modulo de reordenacao (camada 4 do desenho) fica disponivel desde ja,
+      # mesmo que as camadas 1 a 3 subam primeiro.
+      SOLR_MODULES: ltr
+    command:
+      - solr-precreate
+      - sugestoes
+    volumes:
+      - solr-data:/var/solr
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8983/solr/admin/info/system >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  solr-data:

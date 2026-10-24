@@ -1,0 +1,80 @@
+{
+  "add-field-type": [
+    {
+      "name": "prefixo_frase",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "omitNorms": true,
+      "indexAnalyzer": {
+        "tokenizer": { "class": "solr.KeywordTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" },
+          { "class": "solr.PatternReplaceFilterFactory", "pattern": "\\s+", "replacement": " " },
+          { "class": "solr.EdgeNGramFilterFactory", "minGramSize": "2", "maxGramSize": "30" }
+        ]
+      },
+      "queryAnalyzer": {
+        "tokenizer": { "class": "solr.KeywordTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" },
+          { "class": "solr.PatternReplaceFilterFactory", "pattern": "\\s+", "replacement": " " }
+        ]
+      }
+    },
+    {
+      "name": "prefixo_palavra",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "omitNorms": true,
+      "indexAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" },
+          { "class": "solr.EdgeNGramFilterFactory", "minGramSize": "2", "maxGramSize": "20" }
+        ]
+      },
+      "queryAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" }
+        ]
+      }
+    }
+  ],
+
+  "add-field": [
+    { "name": "termo",          "type": "string",          "indexed": true,  "stored": true,  "docValues": true },
+    { "name": "termo_prefixo",  "type": "prefixo_frase",   "indexed": true,  "stored": false },
+    { "name": "termo_infixo",   "type": "prefixo_palavra", "indexed": true,  "stored": false },
+    { "name": "sinonimo",       "type": "prefixo_palavra", "indexed": true,  "stored": true,  "multiValued": true },
+
+    { "name": "tipo",           "type": "string",  "indexed": true,  "stored": true },
+    { "name": "jornada_s",      "type": "string",  "indexed": true,  "stored": true },
+    { "name": "produto_alvo_s", "type": "string",  "indexed": true,  "stored": true },
+    { "name": "destino_s",      "type": "string",  "indexed": false, "stored": true },
+    { "name": "rotulo_s",       "type": "string",  "indexed": false, "stored": true },
+
+    { "name": "segmento_ss",    "type": "strings", "indexed": true,  "stored": true },
+    { "name": "canal_ss",       "type": "strings", "indexed": true,  "stored": true },
+    { "name": "gatilho_ss",     "type": "strings", "indexed": true,  "stored": true },
+    { "name": "exige_elegibilidade_b", "type": "boolean", "indexed": true, "stored": true },
+
+    { "name": "vigencia_inicio_dt", "type": "pdate", "indexed": true, "stored": true },
+    { "name": "vigencia_fim_dt",    "type": "pdate", "indexed": true, "stored": true },
+    { "name": "visto_em_dt",        "type": "pdate", "indexed": true, "stored": true, "docValues": true },
+
+    { "name": "freq_30d_i",           "type": "pint",   "indexed": true, "stored": true, "docValues": true },
+    { "name": "clientes_distintos_i", "type": "pint",   "indexed": true, "stored": true, "docValues": true },
+    { "name": "ctr_f",                "type": "pfloat", "indexed": true, "stored": true, "docValues": true },
+    { "name": "taxa_adesao_f",        "type": "pfloat", "indexed": true, "stored": true, "docValues": true }
+  ],
+
+  "add-copy-field": [
+    { "source": "termo",    "dest": ["termo_prefixo", "termo_infixo"] },
+    { "source": "sinonimo", "dest": ["termo_infixo"] }
+  ]
+}
