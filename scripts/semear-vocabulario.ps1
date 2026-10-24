@@ -60,6 +60,11 @@ function SementeDe([string] $texto) {
     return $soma
 }
 
+# As faixas de relacionamento. Um item que nao declara faixa vale para todas, e
+# isso precisa estar escrito em cada documento: o corte e um {!terms}, e campo
+# vazio nao casa com nada.
+$TodasAsFaixas = @('VAREJO', 'UNICLASS', 'PERSONNALITE', 'PRIVATE')
+
 $documentos = New-Object System.Collections.ArrayList
 
 # ---------------------------------------------------------------------------
@@ -73,6 +78,15 @@ foreach ($item in $catalogo) {
     $tipo = if ($item.tipo) { $item.tipo } else { 'entidade' }
     $segmentos = if ($item.segmento) { ComoLista $item.segmento } else { ComoLista 'PF' }
 
+    # Item sem faixa declarada vale para todas. Precisa ser escrito por extenso:
+    # o fq usa {!terms f=relacionamento_ss}, e ausencia de valor nao casa com
+    # nada — um documento sem faixa ficaria invisivel para todo mundo.
+    $relacionamentos = if ($item.relacionamento) {
+        ComoLista $item.relacionamento
+    } else {
+        $TodasAsFaixas
+    }
+
     [void] $documentos.Add([ordered] @{
         id                    = "cat-$($chave -replace ' ', '-')"
         termo                 = $item.termo
@@ -83,9 +97,12 @@ foreach ($item in $catalogo) {
         destino_s             = "/app/$($item.jornada)/$($chave -replace ' ', '-')"
         rotulo_s              = if ($item.rotulo) { $item.rotulo } else { '' }
         segmento_ss           = $segmentos
+        relacionamento_ss     = $relacionamentos
         canal_ss              = ComoLista 'app'
         gatilho_ss            = ComoLista $item.gatilho
         exige_elegibilidade_b = [bool] $item.elegibilidade
+        veta_inadimplencia_b  = [bool] $item.vetaInadimplencia
+        exige_conta_ativa_b   = [bool] $item.exigeContaAtiva
         vigencia_inicio_dt    = $agora.AddDays(-60).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         vigencia_fim_dt       = $agora.AddDays(365).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         visto_em_dt           = $agora.AddHours(-($s % 48)).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -130,9 +147,12 @@ foreach ($verbo in $grade.Keys) {
             destino_s             = "/busca?q=$($termo -replace ' ', '+')"
             rotulo_s              = ''
             segmento_ss           = $segmentos
+            relacionamento_ss     = $TodasAsFaixas
             canal_ss              = @('app')
             gatilho_ss            = @()
             exige_elegibilidade_b = $false
+            veta_inadimplencia_b  = $false
+            exige_conta_ativa_b   = $false
             vigencia_inicio_dt    = $agora.AddDays(-30).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             vigencia_fim_dt       = $agora.AddDays(365).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
             visto_em_dt           = $agora.AddHours(-($s % 72)).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -170,9 +190,12 @@ foreach ($b in $bloqueados) {
         destino_s             = "/busca?q=$($b.termo -replace ' ', '+')"
         rotulo_s              = ''
         segmento_ss           = @('PF')
+        relacionamento_ss     = $TodasAsFaixas
         canal_ss              = @('app')
         gatilho_ss            = @()
         exige_elegibilidade_b = $false
+        veta_inadimplencia_b  = $false
+        exige_conta_ativa_b   = $false
         vigencia_inicio_dt    = $agora.AddDays(-10).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         vigencia_fim_dt       = $agora.AddDays(365).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         visto_em_dt           = $agora.AddHours(-1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')

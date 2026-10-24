@@ -13,7 +13,7 @@ class ClassificadorDeOrigemTest {
     private final ClassificadorDeOrigem classificador = new ClassificadorDeOrigem();
 
     private static final Perfil COM_GATILHO =
-            new Perfil(List.of(), Set.of("pix_recusado_72h"), Set.of(), Set.of(), true);
+            new Perfil(List.of(), Set.of("pix_recusado_72h"), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true);
 
     @Test
     @DisplayName("gatilho ativo promove o candidato a evento")
@@ -40,10 +40,8 @@ class ClassificadorDeOrigemTest {
     @Test
     @DisplayName("além da cota, o gatilho não promove — e não tira ninguém da disputa")
     void excedenteDaCotaMantemAOrigemOriginal() {
-        var forte = new Candidato("antecipação de limite", "", "/app/a", "credito", "ANTECIPACAO",
-                false, List.of("pix_recusado_72h"), 5000, 16.2, Origem.CATALOGO);
-        var fraco = new Candidato("como antecipar o limite", "", "/app/b", "ajuda", "",
-                false, List.of("pix_recusado_72h"), 5000, 6.3, Origem.CATALOGO);
+        var forte = new Candidato("antecipação de limite", "", "/app/a", "credito", "ANTECIPACAO", Restricoes.NENHUMA, List.of("pix_recusado_72h"), 5000, 16.2, Origem.CATALOGO);
+        var fraco = new Candidato("como antecipar o limite", "", "/app/b", "ajuda", "", Restricoes.NENHUMA, List.of("pix_recusado_72h"), 5000, 6.3, Origem.CATALOGO);
 
         var classificados = classificador.classificar(List.of(forte, fraco), COM_GATILHO, 1);
 
@@ -63,8 +61,7 @@ class ClassificadorDeOrigemTest {
     @Test
     @DisplayName("o histórico não vira evento: ele não veio do índice")
     void historicoNaoEhPromovido() {
-        var doHistorico = new Candidato("antecipar limite", "", "/busca", "busca", "",
-                false, List.of("pix_recusado_72h"), 0, 1.0, Origem.HISTORICO);
+        var doHistorico = new Candidato("antecipar limite", "", "/busca", "busca", "", Restricoes.NENHUMA, List.of("pix_recusado_72h"), 0, 1.0, Origem.HISTORICO);
 
         assertThat(classificador.classificar(List.of(doHistorico), COM_GATILHO, 1))
                 .singleElement().extracting(Candidato::origem).isEqualTo(Origem.HISTORICO);

@@ -46,11 +46,45 @@ alternativa é dado — versionada junto do termo, publicada pelo mesmo caminho.
 - **`taxa_adesao_f` e `ctr_f`** — separados de propósito, com pesos diferentes no
   `boost`. Clique alto com adesão baixa é isca, e o índice aprende a repetir isca se
   os dois virarem um número só.
-- **`gatilho_ss`** — eventos que empurram o termo (`pix_recusado_72h`). O BFF manda o
-  que o perfil tem; o `bq` faz o resto.
-- **`exige_elegibilidade_b`** — quando o serviço de elegibilidade cai, some da lista.
-  Falha fechada, ao contrário do perfil, que falha aberto.
-- **`visto_em_dt`** — alimenta o `recip(ms(NOW,visto_em_dt),...)` da recência.
+- **`gatilho_ss`** — eventos que tornam o termo oportuno (`pix_recusado_72h`,
+  `conta_negativa_30d`). O cruzamento com os gatilhos ativos do perfil acontece no
+  BFF, não aqui: o `ClassificadorDeOrigem` promove o candidato a `EVENTO`, e quem
+  garante a linha dele é a cota, não o score.
+- **`visto_em_dt`** — alimenta o `recip(ms(NOW/HOUR,visto_em_dt),...)` da recência.
+  `NOW/HOUR` e não `NOW`: com `NOW` a chave do cache muda a cada milissegundo e a
+  camada popular, que é a parte cacheável desta consulta, nunca acerta o cache.
+
+## Os dois cortes de público, e por que só eles são `fq`
+
+`segmento_ss` e `relacionamento_ss` são os únicos filtros de público na consulta,
+e isso não é omissão: é o que os separa do resto. Os dois são atributos **estáveis
+e declarados no token** — já estão em mãos quando a requisição chega. Por isso a
+consulta ao índice pode arrancar junto da leitura do perfil em vez de atrás dela,
+e por isso `(prefixo, segmento, relacionamento)` é uma chave de cache estável.
+
+O semeador preenche **todas** as faixas aplicáveis em cada documento. Um item sem
+faixa nenhuma seria invisível para o `{!terms f=relacionamento_ss}` — ausência de
+valor não casa com nada, então "vale para todo mundo" precisa ser escrito por
+extenso.
+
+## Os campos que o perfil julga
+
+Estes três **não** são `fq`, e também por decisão. Eles só são conhecidos quando o
+perfil chega; transformá-los em filtro de índice custaria enfileirar as duas
+leituras e o orçamento de 30 ms passaria de folgado a apertado. O corte acontece na
+`Peneira`, sobre vinte candidatos. Todos falham fechados.
+
+- **`exige_elegibilidade_b`** — sem elegibilidade concedida, some da lista. Quando o
+  item exige elegibilidade e não empurra produto nenhum (portabilidade de salário é
+  um deles), a concessão é chaveada pelo termo normalizado — senão o item sumiria
+  para todo mundo, para sempre, com a falha fechada certa na direção e errada no
+  alvo.
+- **`veta_inadimplencia_b`** — crédito novo não é oferecido a quem está em atraso.
+  O caminho para esse cliente não é esconder a busca: é a jornada de renegociação,
+  que entra pelo gatilho `conta_negativa_30d` e ocupa a linha de evento.
+- **`exige_conta_ativa_b`** — operação que só faz sentido com a conta operante.
+  Conta em estado desconhecido cai aqui junto com a bloqueada, que é o lado seguro:
+  sem saber como está a conta, a operação condicionada não aparece.
 
 ## O que ainda não está aqui
 

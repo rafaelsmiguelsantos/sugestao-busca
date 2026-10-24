@@ -58,10 +58,14 @@
     { "name": "destino_s",      "type": "string",  "indexed": false, "stored": true },
     { "name": "rotulo_s",       "type": "string",  "indexed": false, "stored": true },
 
-    { "name": "segmento_ss",    "type": "strings", "indexed": true,  "stored": true },
-    { "name": "canal_ss",       "type": "strings", "indexed": true,  "stored": true },
-    { "name": "gatilho_ss",     "type": "strings", "indexed": true,  "stored": true },
+    { "name": "segmento_ss",       "type": "strings", "indexed": true,  "stored": true },
+    { "name": "relacionamento_ss", "type": "strings", "indexed": true,  "stored": true },
+    { "name": "canal_ss",          "type": "strings", "indexed": true,  "stored": true },
+    { "name": "gatilho_ss",        "type": "strings", "indexed": true,  "stored": true },
+
     { "name": "exige_elegibilidade_b", "type": "boolean", "indexed": true, "stored": true },
+    { "name": "veta_inadimplencia_b",  "type": "boolean", "indexed": true, "stored": true },
+    { "name": "exige_conta_ativa_b",   "type": "boolean", "indexed": true, "stored": true },
 
     { "name": "vigencia_inicio_dt", "type": "pdate", "indexed": true, "stored": true },
     { "name": "vigencia_fim_dt",    "type": "pdate", "indexed": true, "stored": true },

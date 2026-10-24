@@ -16,26 +16,26 @@ class MisturadorTest {
     @Test
     @DisplayName("a mesma intenção em duas redações ocupa uma linha, não duas")
     void deduplicaPorTermoNormalizado() {
-        var lista = misturador.misturar(List.of(
+        var mistura = misturador.misturar(List.of(
                 Candidatos.de("Antecipação de Limite", Origem.CATALOGO, 1.0),
                 Candidatos.de("antecipacao de limite", Origem.POPULAR, 0.9)),
-                cotas, false);
+                cotas);
 
-        assertThat(lista.itens()).hasSize(1);
+        assertThat(mistura.escolhidos()).hasSize(1);
+        assertThat(mistura.descartes()).singleElement()
+                .extracting(Descarte::motivo).isEqualTo(MotivoDeDescarte.TERMO_DUPLICADO);
     }
 
     @Test
     @DisplayName("na colisão vence a origem mais forte, mas o destino do perdedor é aproveitado")
     void colisaoPreservaODestinoReal() {
-        var doHistorico = new Candidato("antecipar limite", "", "", "busca", "",
-                false, List.of(), 0, 0.9, Origem.HISTORICO);
+        var doHistorico = new Candidato("antecipar limite", "", "", "busca", "", Restricoes.NENHUMA, List.of(), 0, 0.9, Origem.HISTORICO);
         var doCatalogo = new Candidato("Antecipar limite", "pela sua última tentativa de Pix",
-                "/app/credito/antecipacao", "credito", "ANTECIPACAO",
-                false, List.of(), 1000, 1.0, Origem.CATALOGO);
+                "/app/credito/antecipacao", "credito", "ANTECIPACAO", Restricoes.NENHUMA, List.of(), 1000, 1.0, Origem.CATALOGO);
 
-        var lista = misturador.misturar(List.of(doHistorico, doCatalogo), cotas, false);
+        var mistura = misturador.misturar(List.of(doHistorico, doCatalogo), cotas);
 
-        assertThat(lista.itens()).singleElement().satisfies(item -> {
+        assertThat(mistura.escolhidos()).singleElement().satisfies(item -> {
             assertThat(item.origem()).isEqualTo(Origem.HISTORICO);
             assertThat(item.destino()).isEqualTo("/app/credito/antecipacao");
             assertThat(item.rotulo()).isEqualTo("pela sua última tentativa de Pix");
@@ -53,10 +53,13 @@ class MisturadorTest {
             candidatos.add(Candidatos.doIndice("popular " + i, 0.1, 1000));
         }
 
-        var lista = misturador.misturar(candidatos, cotas, false);
+        var mistura = misturador.misturar(candidatos, cotas);
 
-        assertThat(lista.itens()).filteredOn(s -> s.origem() == Origem.HISTORICO).hasSize(2);
-        assertThat(lista.itens()).hasSize(cotas.limite());
+        assertThat(mistura.escolhidos()).filteredOn(c -> c.origem() == Origem.HISTORICO).hasSize(2);
+        assertThat(mistura.escolhidos()).hasSize(cotas.limite());
+        assertThat(mistura.descartes())
+                .filteredOn(d -> d.motivo() == MotivoDeDescarte.COTA_DE_HISTORICO)
+                .hasSize(4);
     }
 
     @Test
@@ -68,21 +71,26 @@ class MisturadorTest {
             candidatos.add(Candidatos.doIndice("popular " + i, 1.0, 1000));
         }
 
-        var lista = misturador.misturar(candidatos, cotas, false);
+        var mistura = misturador.misturar(candidatos, cotas);
 
-        assertThat(lista.itens().getFirst().origem()).isEqualTo(Origem.EVENTO);
-        assertThat(lista.itens()).filteredOn(s -> s.origem() == Origem.EVENTO).hasSize(1);
+        assertThat(mistura.escolhidos().getFirst().origem()).isEqualTo(Origem.EVENTO);
+        assertThat(mistura.escolhidos()).filteredOn(c -> c.origem() == Origem.EVENTO).hasSize(1);
     }
 
     @Test
-    @DisplayName("a lista nunca passa do limite de posições")
+    @DisplayName("a lista nunca passa do limite, e o que sobra sai registrado")
     void cortaNoLimite() {
         var candidatos = new ArrayList<Candidato>();
         for (int i = 0; i < 40; i++) {
             candidatos.add(Candidatos.doIndice("termo " + i, i, 1000));
         }
 
-        assertThat(misturador.misturar(candidatos, cotas, false).itens()).hasSize(8);
+        var mistura = misturador.misturar(candidatos, cotas);
+
+        assertThat(mistura.escolhidos()).hasSize(8);
+        assertThat(mistura.descartes())
+                .filteredOn(d -> d.motivo() == MotivoDeDescarte.ALEM_DO_LIMITE)
+                .hasSize(32);
     }
 
     @Test
@@ -94,9 +102,9 @@ class MisturadorTest {
                 Candidatos.doIndice("popular alto", 87.4, 1000),
                 Candidatos.de("meu historico", Origem.HISTORICO, 0.95));
 
-        var lista = misturador.misturar(candidatos, Cotas.padrao(), false);
+        var mistura = misturador.misturar(candidatos, Cotas.padrao());
 
-        assertThat(lista.itens().getFirst().origem()).isEqualTo(Origem.POPULAR);
-        assertThat(lista.itens()).hasSize(2);
+        assertThat(mistura.escolhidos().getFirst().origem()).isEqualTo(Origem.POPULAR);
+        assertThat(mistura.escolhidos()).hasSize(2);
     }
 }

@@ -2,9 +2,10 @@ package dev.sugestao.busca.adaptador.saida.solr;
 
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
 import dev.sugestao.busca.dominio.Candidato;
+import dev.sugestao.busca.dominio.ContextoDeBusca;
 import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Prefixo;
-import dev.sugestao.busca.dominio.Segmento;
+import dev.sugestao.busca.dominio.Restricoes;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.common.SolrDocument;
 
@@ -30,9 +31,9 @@ public class CatalogoSolr implements CatalogoDeSugestoes {
     }
 
     @Override
-    public List<Candidato> candidatos(Prefixo prefixo, Segmento segmento, int limite) {
+    public List<Candidato> candidatos(Prefixo prefixo, ContextoDeBusca contexto, int limite) {
         try {
-            var resposta = solr.query(colecao, consulta.montar(prefixo, segmento, limite));
+            var resposta = solr.query(colecao, consulta.montar(prefixo, contexto, limite));
             return resposta.getResults().stream().map(CatalogoSolr::paraCandidato).toList();
         } catch (Exception e) {
             throw new FalhaNoIndice("consulta ao índice de sugestões falhou", e);
@@ -53,7 +54,10 @@ public class CatalogoSolr implements CatalogoDeSugestoes {
                 texto(doc, "destino_s"),
                 texto(doc, "jornada_s"),
                 texto(doc, "produto_alvo_s"),
-                booleano(doc, "exige_elegibilidade_b"),
+                new Restricoes(
+                        booleano(doc, "exige_elegibilidade_b"),
+                        booleano(doc, "veta_inadimplencia_b"),
+                        booleano(doc, "exige_conta_ativa_b")),
                 lista(doc, "gatilho_ss"),
                 inteiro(doc, "clientes_distintos_i"),
                 decimal(doc, "score"),

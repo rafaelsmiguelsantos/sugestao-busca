@@ -132,6 +132,83 @@ lista volta vazia, o que é o comportamento correto e não um defeito. Depois de
 alguns aquecimentos a lista aparece. Para demonstrar sem aquecer, suba
 `sugestao.prazo.solr-ms`.
 
+### O caminho de escrita, de ponta a ponta
+
+O app registra o que aconteceu; nada disso está no orçamento de 30 ms. O
+identificador do cliente vem do token, **nunca do corpo** — se viesse, quem
+controlasse o corpo controlaria o piso de k-anonimato.
+
+```powershell
+# 1. trinta pessoas distintas digitam o mesmo termo
+1..30 | ForEach-Object {
+  curl.exe -s -X POST http://localhost:8080/v1/eventos `
+    -H "Content-Type: application/json" -H "X-Cliente-Id: cliente-$_" `
+    -d '[{"tipo":"BUSCA_DIGITADA","termo":"trocar titularidade da conta"}]'
+}
+
+# 2. roda a agregação na hora, em vez de esperar o relógio
+curl.exe -s -X POST http://localhost:8080/v1/aprendizado/rodar
+
+# 3. o termo agora é sugestão
+curl.exe -s "http://localhost:8080/v1/sugestoes?q=trocar+titu" -H "X-Cliente-Id: pf-novo"
+```
+
+Com 29 pessoas a resposta é `publicados=0 retidos=1`; com a trigésima, o termo
+entra. **Repetição não substitui gente**: cem buscas de uma pessoa só continuam
+sendo `retidos=1`, porque o que se conta é cliente distinto, não sessão.
+
+Os quatro tipos de evento são `BUSCA_DIGITADA`, `SUGESTAO_EXIBIDA`,
+`SUGESTAO_CLICADA` e `ADESAO`. A impressão é registrada **com posição** e mesmo
+quando ninguém clica — sem ela o CTR seria clique sobre busca, que mede
+popularidade do termo, não se a sugestão acertou.
+
+### Os dois portões, e por que são dois
+
+```powershell
+curl.exe -s -X POST http://localhost:8080/v1/eventos `
+  -H "Content-Type: application/json" -H "X-Cliente-Id: c-1" `
+  -d '[{"tipo":"BUSCA_DIGITADA","termo":"adiantar para cpf 111.444.777-35"}]'
+# -> {"aceitos":0,"descartados":1,"motivos":{"CPF":1}}
+```
+
+O **saneamento** barra padrão conhecido na ingestão, não na publicação: CPF e
+CNPJ por dígito verificador, cartão por Luhn, e-mail, chave Pix aleatória, e uma
+regra larga de sequência numérica que apanha agência e conta. Descarta o termo
+inteiro — mascarar o CPF e guardar o resto da frase guarda o resto da frase, e é
+no resto que costuma estar o nome.
+
+O **piso de k-anonimato** pega o que nenhuma expressão regular pega.
+`adiantamento para maria silva` passa pelo saneamento, porque nome próprio não
+tem padrão, e fica retido na publicação por ter vindo de uma pessoa só. Os dois
+são complementares: um sabe a forma do dado, o outro sabe quantas pessoas o
+disseram.
+
+A resposta da ingestão **não devolve o termo barrado**, só a contagem por
+motivo. Devolvê-lo recriaria no corpo da resposta — e no log de quem o
+imprimisse — exatamente o vazamento que o portão acabou de impedir.
+
+### Ver a decisão por dentro
+
+```powershell
+curl.exe -s "http://localhost:8080/v1/sugestoes?q=cdb&explicar=true" -H "X-Cliente-Id: pf-investidor"
+```
+
+```json
+"explicacao": {
+  "perfil": "ENCONTRADO", "msTotal": 6, "candidatosDoIndice": 2,
+  "descartes": [ { "termo": "CDB", "origem": "CATALOGO", "motivo": "PRODUTO_JA_CONTRATADO" } ],
+  "linhas":    [ { "posicao": 0, "termo": "cdb", "origem": "HISTORICO", "relevancia": 1.0 } ]
+}
+```
+
+Numa camada de sugestão a pergunta que chega do negócio quase nunca é por que
+uma linha apareceu — é por que a outra não apareceu. O rastro responde isso, e
+sai em `DEBUG` a cada requisição mesmo sem o parâmetro.
+
+**`sugestao.explicacao-habilitada` fica desligado em produção.** A lista de
+descartes diz quais produtos o cliente não pode contratar, e isso é informação
+sobre a pessoa, não sobre a busca.
+
 ## Estrutura
 
 A arquitetura é hexagonal: o domínio e a aplicação são Java comum, sem nenhuma
@@ -141,23 +218,35 @@ anotação de framework, e tudo o que é tecnologia vive em `adaptador`.
 src/main/java/dev/sugestao/busca/
 ├── dominio/                   regras. Zero Spring, zero SolrJ.
 │   ├── Prefixo, Normalizacao  normalização única, usada também pelo semeador
-│   ├── Candidato, Sugestao    linha em potencial / linha pronta
+│   ├── Candidato, Restricoes  linha em potencial e o que ela exige do cliente
 │   ├── Origem, Cotas          de onde veio e quanto cada origem pode ocupar
-│   ├── Perfil                 histórico, gatilhos, elegibilidade, NEUTRO
+│   ├── Cliente, ContextoDeBusca   token: identidade / coorte sem identidade
+│   ├── Perfil, SituacaoDaConta    comportamento e estado de conta
 │   ├── ClassificadorDeOrigem  gatilho ativo promove candidato a EVENTO
 │   ├── Peneira                o que o perfil tira depois que o índice respondeu
-│   └── Misturador             dedup, cota, limite
+│   ├── Misturador             dedup, cota, limite
+│   ├── Descarte               por que cada candidato ficou de fora
+│   ├── evento/Saneador        o portão de PII, na ingestão
+│   └── agregado/              TermoAgregado, ComportamentoDoCliente
 │
 ├── aplicacao/
-│   ├── porta/entrada/         SugerirSugestoes (o contrato do caso de uso)
-│   ├── porta/saida/           CatalogoDeSugestoes, RepositorioDePerfil
-│   ├── Prazos, ParametrosDeSugestao
-│   └── casodeuso/             SugerirSugestoesCasoDeUso: leque, prazos, ordem
+│   ├── porta/entrada/         SugerirSugestoes, RegistrarEventos,
+│   │                          AprenderComComportamento
+│   ├── porta/saida/           CatalogoDeSugestoes, RepositorioDePerfil,
+│   │                          FilaDeEventos, RepositorioDeAgregados,
+│   │                          PublicadorDeVocabulario, EscritorDePerfil
+│   ├── Prazos, Colheita, RastroDaSugestao, Parametros*
+│   └── casodeuso/             SugerirSugestoes (leitura),
+│                              RegistrarEventos + AprenderComComportamento (escrita)
 │
 ├── adaptador/
-│   ├── entrada/web/           controller, DTO, resolvedor do cliente
-│   └── saida/solr/            ConsultaDeCandidatos (as 4 camadas), CatalogoSolr
-│       saida/perfil/          perfis falsos em memória
+│   ├── entrada/web/           controllers, DTOs, resolvedor do cliente
+│   ├── entrada/agendador/     o relógio que aciona o aprendizado
+│   └── saida/solr/            ConsultaDeCandidatos (as 4 camadas),
+│       │                      CatalogoSolr (lê), PublicadorSolr (escreve)
+│       saida/fila/            FilaEmMemoria — o lugar do MSK
+│       saida/agregado/        AgregadosEmMemoria — o lugar do job de janela
+│       saida/perfil/          PerfisEmMemoria — o lugar do DynamoDB
 │
 └── configuracao/              o único lugar que sabe quem implementa cada porta
 
@@ -210,6 +299,28 @@ do arquivo passa a ser lido como código.
 - **O filtro de tipo inclui `entidade`.** O desenho escreve `tipo:(consulta OR acao)`,
   mas o catálogo marca produto e artigo de ajuda como `entidade` — deixar esse tipo
   de fora apagaria a camada de catálogo inteira.
+- **Dois clientes Solr, não um.** A leitura tem 18 ms e precisa desistir; a
+  publicação roda sem ninguém esperando e não pode. Compartilhar um cliente só
+  parece economia e é acoplamento: foi assim que a primeira versão ficou, e a
+  publicação estourava em 18 ms a cada rodada — em silêncio, porque o agendador
+  engole o erro e tenta de novo. O índice simplesmente parava de aprender.
+- **Leitura e escrita de perfil são duas interfaces.** O mesmo objeto atende as
+  duas, mas o caso de uso de sugestão recebe só `RepositorioDePerfil` e por isso
+  não tem como escrever. "Nenhuma seta do caminho de leitura escreve" deixa de ser
+  promessa e vira assinatura de construtor.
+- **O identificador do cliente vem do token, nunca do corpo do evento.** É ele que
+  a agregação conta para medir clientes distintos: quem controlasse o corpo
+  controlaria o piso de k-anonimato, e bastaria fabricar trinta identificadores
+  para publicar o que quisesse como sugestão para todo mundo.
+- **O vocabulário publicado usa a forma normalizada, não a redação de quem digitou.**
+  Guardar a redação crua faria o índice carregar o jeito de escrever de uma pessoa
+  específica, e com acento e maiúscula preservados a chave de dedup do BFF deixaria
+  de bater com o que está no índice.
+- **A escrita de perfil mescla, não sobrescreve.** A agregação de busca só sabe de
+  histórico; gatilho, elegibilidade, produto contratado e situação da conta vêm de
+  outros produtores. Sobrescrever tudo era o bug silencioso óbvio: uma busca
+  qualquer apagaria a inadimplência do cliente e o crédito novo voltaria a ser
+  oferecido na tecla seguinte.
 
 ## Próximos passos
 
@@ -217,15 +328,42 @@ do arquivo passa a ser lido como código.
    desenho. O mecanismo inteiro aparece com esse tamanho; o que não aparece é
    concorrência de verdade entre candidatos no mesmo prefixo.
 2. ~~`GET /v1/sugestoes` com o leque paralelo em threads virtuais~~ — feito.
-3. Página de demonstração: digitar as mesmas letras com perfis diferentes.
-4. Registro de impressão **com posição**. É o que falta para a camada 4 ser
-   treinável e para os dois números de relevância do desenho existirem.
+3. ~~Registro de impressão **com posição**~~ — feito, junto do caminho de escrita
+   inteiro: ingestão, saneamento, agregação em janelas e publicação pelo piso.
+4. Página de demonstração: digitar as mesmas letras com perfis diferentes.
+5. Camada 4 (LTR). Agora há impressão com posição, que era o que faltava. O que
+   falta é volume: com 101 documentos não há o que um modelo aprenda.
 
-### Uma pergunta em aberto
+### O que é de mentira, e vale saber qual
 
-O histórico do próprio cliente não passa pelo filtro de elegibilidade, porque ele
-não é uma oferta: é o que a pessoa já digitou. Mas o destino é o mesmo. Hoje, um
-cliente que buscou "aumentar limite do cartão" e não é elegível continua vendo
-essa linha pelo histórico, embora a linha de catálogo tenha sumido. Apagar o
-histórico de alguém por inelegibilidade e levar alguém a uma porta fechada são
-dois erros diferentes, e qual deles é pior é decisão de negócio, não de código.
+| peça | aqui | no desenho |
+|---|---|---|
+| fila de eventos | `FilaEmMemoria` | Amazon MSK, particionado por cliente |
+| agregação | recálculo em memória a cada rodada | job de janela deslizante |
+| perfil | `ConcurrentHashMap` | DynamoDB |
+| gatilhos | só os dos perfis de demonstração | produtores próprios (Pix, fatura, fraude) |
+
+A fila em memória não finge ser Kafka: não tem partição, não tem
+reprocessamento, não sobrevive a reinício, e um evento consumido se perde se a
+agregação falhar depois. As três propriedades que faltam são exatamente as que
+justificam existir um MSK no desenho. O que ela preserva é a *forma* — publicar e
+consumir são as mesmas duas chamadas, e trocar é escrever outro adaptador.
+
+### Duas perguntas em aberto
+
+**1. O histórico não passa pelo filtro de elegibilidade.** Ele não é uma oferta:
+é o que a pessoa já digitou. Mas o destino é o mesmo. Hoje, um cliente que buscou
+"aumentar limite do cartão" e não é elegível continua vendo essa linha pelo
+histórico, embora a de catálogo tenha sumido. Apagar o histórico de alguém por
+inelegibilidade e levar alguém a uma porta fechada são dois erros diferentes, e
+qual deles é pior é decisão de negócio, não de código.
+
+**2. Termo vindo do log não carrega restrição.** O catálogo declara
+`veta_inadimplencia_b` e `exige_conta_ativa_b`; termo publicado a partir de busca
+não declara nada, porque ninguém o curou. Na prática: um cliente inadimplente não
+recebe a oferta `empréstimo pessoal`, mas continua recebendo `contratar
+emprestimo` — que veio do log e leva a uma página de busca, não a uma proposta.
+Defensável enquanto o destino for busca; deixa de ser no dia em que a camada
+popular ganhar deep link. O conserto seria a agregação classificar o termo numa
+jornada e herdar as restrições dela, e isso é trabalho de curadoria, não de
+código.

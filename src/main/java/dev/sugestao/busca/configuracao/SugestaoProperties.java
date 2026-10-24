@@ -23,7 +23,16 @@ public record SugestaoProperties(
         int candidatosSolr,
         Cota cota,
         int kAnonimatoMinimo,
-        List<String> tiposSugeriveis) {
+        List<String> tiposSugeriveis,
+
+        /*
+         * Liga o parametro ?explicar=true. Fica DESLIGADO em producao: a lista
+         * de descartes diz quais produtos o cliente nao pode contratar, e isso
+         * e informacao sobre a pessoa, nao sobre a busca.
+         */
+        boolean explicacaoHabilitada,
+
+        Aprendizado aprendizado) {
 
     public record Solr(String baseUrl, String colecao) { }
 
@@ -31,4 +40,31 @@ public record SugestaoProperties(
 
     /** Teto por origem na lista final. Sem cota, a lista colapsa na origem mais popular. */
     public record Cota(int historico, int evento) { }
+
+    /**
+     * O caminho de escrita. Nada aqui esta no orcamento de 30 ms: sao os
+     * numeros do que roda fora da requisicao.
+     *
+     * <p>{@code gatilhoManual} liga o POST /v1/aprendizado/rodar, que existe
+     * para a demonstracao. DESLIGAR EM PRODUCAO: e um gatilho que da para
+     * disparar em laco.
+     */
+    public record Aprendizado(
+            long intervaloMs,
+            int janelaVocabularioDias,
+            int janelaComportamentoHoras,
+            int tamanhoDoHistorico,
+            int loteDeConsumo,
+            int tetoDaFila,
+            int tetoDeEventos,
+
+            /*
+             * O prazo da publicacao no indice. Nao tem relacao com os 18 ms da
+             * leitura: aqui ninguem esta esperando, e um update seguido de
+             * commit leva segundos. Reusar o prazo da leitura foi o bug que
+             * fez o indice parar de aprender em silencio.
+             */
+            long publicacaoTimeoutMs,
+
+            boolean gatilhoManual) { }
 }

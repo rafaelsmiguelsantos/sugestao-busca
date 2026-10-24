@@ -1,0 +1,87 @@
+package dev.sugestao.busca.aplicacao.casodeuso;
+
+import dev.sugestao.busca.aplicacao.ParametrosDeAprendizado;
+import dev.sugestao.busca.aplicacao.porta.entrada.AprenderComComportamento;
+import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDoAprendizado;
+import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
+import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
+import dev.sugestao.busca.aplicacao.porta.saida.PublicadorDeVocabulario;
+import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
+import dev.sugestao.busca.dominio.agregado.TermoAgregado;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * O caminho de escrita inteiro, fora da requisição: consome, agrega, saneia por
+ * k-anonimato, publica.
+ *
+ * <p>É aqui que a pergunta "como isso aprende" tem resposta concreta. O que a
+ * pessoa digitou volta para ela pelo perfil, em 24 h; o que muita gente digitou
+ * vira vocabulário para todos em 30 d, e só depois de provar que veio de gente
+ * suficiente. Os dois caminhos saem do mesmo evento e nunca se cruzam.
+ *
+ * <p>A ordem entre publicar e atualizar perfil não é indiferente. O vocabulário
+ * vai primeiro porque é ele que o perfil referencia: um histórico apontando para
+ * um termo que ainda não existe no índice dá lista com buraco, enquanto um termo
+ * publicado que nenhum perfil cita ainda é apenas um termo que ninguém viu.
+ */
+public class AprenderComComportamentoCasoDeUso implements AprenderComComportamento {
+
+    private static final int EXEMPLOS_NO_RELATORIO = 5;
+
+    private final FilaDeEventos fila;
+    private final RepositorioDeAgregados agregados;
+    private final PublicadorDeVocabulario publicador;
+    private final EscritorDePerfil perfis;
+    private final ParametrosDeAprendizado parametros;
+
+    public AprenderComComportamentoCasoDeUso(
+            FilaDeEventos fila,
+            RepositorioDeAgregados agregados,
+            PublicadorDeVocabulario publicador,
+            EscritorDePerfil perfis,
+            ParametrosDeAprendizado parametros) {
+        this.fila = fila;
+        this.agregados = agregados;
+        this.publicador = publicador;
+        this.perfis = perfis;
+        this.parametros = parametros;
+    }
+
+    @Override
+    public ResultadoDoAprendizado executar() {
+        var lote = fila.consumir(parametros.loteDeConsumo());
+        agregados.acumular(lote);
+
+        var termos = agregados.termos(parametros.janelaDoVocabulario());
+
+        var publicaveis = new ArrayList<TermoAgregado>(termos.size());
+        var retidos = new ArrayList<String>();
+
+        for (TermoAgregado termo : termos) {
+            if (termo.acimaDoPiso(parametros.kAnonimatoMinimo())) {
+                publicaveis.add(termo);
+            } else {
+                retidos.add(termo.termo());
+            }
+        }
+
+        int publicados = publicaveis.isEmpty() ? 0 : publicador.publicar(publicaveis);
+
+        var comportamentos = agregados.comportamentos(
+                parametros.janelaDoComportamento(), parametros.tamanhoDoHistorico());
+        perfis.atualizar(comportamentos);
+
+        return new ResultadoDoAprendizado(
+                lote.size(),
+                termos.size(),
+                publicados,
+                retidos.size(),
+                comportamentos.size(),
+                // Só o relatório operacional vê termo retido, e só alguns. Eles
+                // são, por definição, os que vieram de gente de menos — é
+                // exatamente o conjunto que não deve circular.
+                retidos.stream().limit(EXEMPLOS_NO_RELATORIO).toList());
+    }
+}

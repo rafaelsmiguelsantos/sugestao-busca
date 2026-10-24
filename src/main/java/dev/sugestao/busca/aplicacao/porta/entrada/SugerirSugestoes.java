@@ -1,7 +1,5 @@
 package dev.sugestao.busca.aplicacao.porta.entrada;
 
-import dev.sugestao.busca.dominio.ListaDeSugestoes;
-
 /**
  * A porta de entrada: tudo o que o mundo de fora pode pedir a esta aplicação.
  *
@@ -10,5 +8,5 @@ import dev.sugestao.busca.dominio.ListaDeSugestoes;
  */
 public interface SugerirSugestoes {
 
-    ListaDeSugestoes executar(ConsultaDeSugestao consulta);
+    ResultadoDaSugestao executar(ConsultaDeSugestao consulta);
 }

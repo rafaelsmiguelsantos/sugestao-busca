@@ -1,12 +1,17 @@
 package dev.sugestao.busca.aplicacao.casodeuso;
 
+import dev.sugestao.busca.aplicacao.Colheita;
 import dev.sugestao.busca.aplicacao.ParametrosDeSugestao;
+import dev.sugestao.busca.aplicacao.RastroDaSugestao;
 import dev.sugestao.busca.aplicacao.porta.entrada.ConsultaDeSugestao;
+import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDaSugestao;
 import dev.sugestao.busca.aplicacao.porta.entrada.SugerirSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDePerfil;
 import dev.sugestao.busca.dominio.Candidato;
 import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
+import dev.sugestao.busca.dominio.Cliente;
+import dev.sugestao.busca.dominio.Descarte;
 import dev.sugestao.busca.dominio.ListaDeSugestoes;
 import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Normalizacao;
@@ -14,6 +19,7 @@ import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Peneira;
 import dev.sugestao.busca.dominio.Perfil;
 import dev.sugestao.busca.dominio.Prefixo;
+import dev.sugestao.busca.dominio.Restricoes;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,9 +34,9 @@ import java.util.function.Supplier;
 /**
  * O caso de uso. Orquestra o leque paralelo, aplica os prazos e entrega a lista.
  *
- * <p>Esta classe não sabe que existe HTTP, nem Solr, nem Spring. Ela fala com
- * duas portas de saída e com quatro objetos de domínio, e é testável inteira sem
- * subir nada.
+ * <p>Esta classe não sabe que existe HTTP, nem Solr, nem Spring, nem log. Ela
+ * fala com duas portas de saída e com quatro objetos de domínio, e é testável
+ * inteira sem subir nada.
  *
  * <p>A ordem das etapas é a do desenho e não é intercambiável: classificar o
  * evento precisa do perfil; a peneira precisa da classificação, porque o piso de
@@ -62,18 +68,19 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
     }
 
     @Override
-    public ListaDeSugestoes executar(ConsultaDeSugestao consulta) {
+    public ResultadoDaSugestao executar(ConsultaDeSugestao consulta) {
+        long inicio = System.nanoTime();
         Prefixo prefixo = Prefixo.de(consulta.prefixoDigitado());
+        var cliente = consulta.cliente();
 
         // O corte mais barato do conjunto, e o único que acontece antes de
         // qualquer rede. Com um caractere, o leque de candidatos é o índice
         // inteiro e o prazo de 18 ms não se sustenta.
         if (prefixo.curtoDemais(parametros.prefixoMinimo())) {
-            return ListaDeSugestoes.vazia();
+            return new ResultadoDaSugestao(
+                    ListaDeSugestoes.vazia(),
+                    rastroDeRecusa(consulta, prefixo, cliente, inicio));
         }
-
-        var cliente = consulta.cliente();
-        long inicio = System.nanoTime();
 
         // O executor fecha esperando as tarefas. Quem garante que isso não
         // transforma o prazo em ficção são duas coisas juntas: o cancelamento
@@ -85,34 +92,101 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
             // O segmento vem do token: a consulta ao índice arranca junto com a
             // leitura do perfil, não atrás dela.
             Future<List<Candidato>> doIndice = executor.submit(() ->
-                    catalogo.candidatos(prefixo, cliente.segmento(), parametros.candidatosDoIndice()));
+                    catalogo.candidatos(prefixo, cliente.contexto(), parametros.candidatosDoIndice()));
 
             Future<Perfil> doPerfil = executor.submit(() ->
                     perfis.porCliente(cliente.id()));
 
-            List<Candidato> candidatosDoIndice =
-                    aguardar(doIndice, inicio, parametros.prazos().solr(), List::of);
+            var indice = aguardar(doIndice, inicio, parametros.prazos().solr(), List::<Candidato>of);
+            long msAteIndice = decorridoEmMs(inicio);
 
-            Perfil perfil =
-                    aguardar(doPerfil, inicio, parametros.prazos().perfil(), () -> Perfil.NEUTRO);
+            var perfil = aguardar(doPerfil, inicio, parametros.prazos().perfil(), () -> Perfil.NEUTRO);
+            long msAtePerfil = decorridoEmMs(inicio);
 
-            return montar(prefixo, candidatosDoIndice, perfil);
+            return montar(consulta, prefixo, cliente, indice, perfil,
+                    inicio, msAteIndice, msAtePerfil);
         }
     }
 
-    private ListaDeSugestoes montar(Prefixo prefixo, List<Candidato> doIndice, Perfil perfil) {
-        var candidatos = new ArrayList<>(
-                classificador.classificar(doIndice, perfil, parametros.cotas().evento()));
-        candidatos.addAll(candidatosDoHistorico(perfil, prefixo));
+    private ResultadoDaSugestao montar(
+            ConsultaDeSugestao consulta,
+            Prefixo prefixo,
+            Cliente cliente,
+            Colheita<List<Candidato>> indice,
+            Colheita<Perfil> colhido,
+            long inicio,
+            long msAteIndice,
+            long msAtePerfil) {
 
-        var sobreviventes = peneira.aplicar(candidatos, perfil);
+        Perfil perfil = colhido.valor();
+
+        var classificados = classificador.classificar(
+                indice.valor(), perfil, parametros.cotas().evento());
+        int promovidos = (int) classificados.stream()
+                .filter(c -> c.origem() == Origem.EVENTO).count();
+
+        var doHistorico = candidatosDoHistorico(perfil, prefixo);
+
+        var todos = new ArrayList<>(classificados);
+        todos.addAll(doHistorico);
+
+        var peneirada = peneira.aplicar(todos, perfil);
+        var mistura = misturador.misturar(peneirada.sobreviventes(), parametros.cotas());
+
+        var descartes = new ArrayList<Descarte>(peneirada.descartes());
+        descartes.addAll(mistura.descartes());
 
         // Degradada quando o perfil não chegou: a lista ainda é útil, mas é a
         // popular do segmento. O app usa isto para não registrar a impressão
         // como se fosse personalizada — senão a camada 4 aprenderia com ruído.
         boolean degradada = !perfil.conhecido();
 
-        return misturador.misturar(sobreviventes, parametros.cotas(), degradada);
+        var lista = new ListaDeSugestoes(
+                mistura.escolhidos().stream().map(Candidato::paraSugestao).toList(),
+                degradada);
+
+        var linhas = new ArrayList<RastroDaSugestao.Linha>(mistura.escolhidos().size());
+        for (int i = 0; i < mistura.escolhidos().size(); i++) {
+            var c = mistura.escolhidos().get(i);
+            linhas.add(new RastroDaSugestao.Linha(i, c.termo(), c.origem(), c.relevancia(), c.destino()));
+        }
+
+        var rastro = new RastroDaSugestao(
+                consulta.prefixoDigitado(),
+                prefixo.valor(),
+                cliente.id(),
+                cliente.segmento(),
+                estadoDoPerfil(colhido),
+                msAteIndice,
+                msAtePerfil,
+                decorridoEmMs(inicio),
+                indice.valor().size(),
+                doHistorico.size(),
+                promovidos,
+                descartes,
+                linhas);
+
+        return new ResultadoDaSugestao(lista, rastro);
+    }
+
+    private RastroDaSugestao.EstadoDoPerfil estadoDoPerfil(Colheita<Perfil> colhido) {
+        return switch (colhido.motivo()) {
+            case RESPONDEU -> colhido.valor().conhecido()
+                    ? RastroDaSugestao.EstadoDoPerfil.ENCONTRADO
+                    : RastroDaSugestao.EstadoDoPerfil.SEM_PERFIL;
+            case PRAZO_VENCIDO, INTERROMPIDA -> RastroDaSugestao.EstadoDoPerfil.PRAZO_VENCIDO;
+            case FALHOU -> RastroDaSugestao.EstadoDoPerfil.FALHOU;
+        };
+    }
+
+    private RastroDaSugestao rastroDeRecusa(
+            ConsultaDeSugestao consulta, Prefixo prefixo, Cliente cliente, long inicio) {
+
+        return new RastroDaSugestao(
+                consulta.prefixoDigitado(), prefixo.valor(), cliente.id(), cliente.segmento(),
+                RastroDaSugestao.EstadoDoPerfil.SEM_PERFIL,
+                0, 0, decorridoEmMs(inicio),
+                0, 0, 0, List.of(), List.of());
     }
 
     /**
@@ -138,7 +212,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
                     "/busca?q=" + termo.replace(' ', '+'),
                     "busca",
                     "",
-                    false,
+                    Restricoes.NENHUMA,
                     List.of(),
                     0,
                     Math.max(0.5, 1.0 - (i * 0.05)),
@@ -164,23 +238,29 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
      * dizer. Descartar resultado pronto seria degradar a lista por relógio,
      * sem que nenhuma dependência tivesse falhado.
      */
-    private <T> T aguardar(Future<T> futuro, long inicio, Duration prazo, Supplier<T> alternativa) {
+    private <T> Colheita<T> aguardar(
+            Future<T> futuro, long inicio, Duration prazo, Supplier<T> alternativa) {
+
         long teto = Math.min(prazo.toNanos(), parametros.prazos().total().toNanos());
         long restante = Math.max(0, teto - (System.nanoTime() - inicio));
 
         try {
-            return futuro.get(restante, TimeUnit.NANOSECONDS);
+            return Colheita.respondeu(futuro.get(restante, TimeUnit.NANOSECONDS));
         } catch (TimeoutException e) {
             futuro.cancel(true);
-            return alternativa.get();
+            return new Colheita<>(alternativa.get(), Colheita.Motivo.PRAZO_VENCIDO);
         } catch (ExecutionException e) {
             // A dependência respondeu com falha. Para o cliente é o mesmo que
             // não ter respondido: a caixa de busca nunca fica sem lista.
-            return alternativa.get();
+            return new Colheita<>(alternativa.get(), Colheita.Motivo.FALHOU);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             futuro.cancel(true);
-            return alternativa.get();
+            return new Colheita<>(alternativa.get(), Colheita.Motivo.INTERROMPIDA);
         }
+    }
+
+    private static long decorridoEmMs(long inicio) {
+        return (System.nanoTime() - inicio) / 1_000_000;
     }
 }

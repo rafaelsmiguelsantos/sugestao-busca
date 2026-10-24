@@ -5,8 +5,8 @@ import java.util.Objects;
 
 /**
  * Uma linha em potencial, antes da peneira e da mistura. Carrega o que o perfil
- * precisa para julgá-la: o produto que ela empurra, se ela exige elegibilidade e
- * quais gatilhos a tornam oportuna.
+ * precisa para julgá-la: o produto que ela empurra, o que ela exige do cliente,
+ * e quais gatilhos a tornam oportuna.
  *
  * <p>{@code clientesDistintos} viaja junto de propósito. O piso de k-anonimato é
  * um {@code fq} no índice — este campo é só a rede de segurança do BFF, para o
@@ -18,7 +18,7 @@ public record Candidato(
         String destino,
         String jornada,
         String produtoAlvo,
-        boolean exigeElegibilidade,
+        Restricoes restricoes,
         List<String> gatilhos,
         int clientesDistintos,
         double relevancia,
@@ -26,6 +26,7 @@ public record Candidato(
 
     public Candidato {
         Objects.requireNonNull(termo, "termo");
+        restricoes = restricoes == null ? Restricoes.NENHUMA : restricoes;
         gatilhos = gatilhos == null ? List.of() : List.copyOf(gatilhos);
         origem = origem == null ? Origem.POPULAR : origem;
     }
@@ -37,12 +38,12 @@ public record Candidato(
 
     public Candidato com(Origem outra) {
         return new Candidato(termo, rotulo, destino, jornada, produtoAlvo,
-                exigeElegibilidade, gatilhos, clientesDistintos, relevancia, outra);
+                restricoes, gatilhos, clientesDistintos, relevancia, outra);
     }
 
     public Candidato com(double outraRelevancia) {
         return new Candidato(termo, rotulo, destino, jornada, produtoAlvo,
-                exigeElegibilidade, gatilhos, clientesDistintos, outraRelevancia, origem);
+                restricoes, gatilhos, clientesDistintos, outraRelevancia, origem);
     }
 
     /**
@@ -58,7 +59,7 @@ public record Candidato(
                 vazio(destino) ? outro.destino() : destino,
                 vazio(jornada) ? outro.jornada() : jornada,
                 vazio(produtoAlvo) ? outro.produtoAlvo() : produtoAlvo,
-                exigeElegibilidade,
+                restricoes,
                 gatilhos.isEmpty() ? outro.gatilhos() : gatilhos,
                 Math.max(clientesDistintos, outro.clientesDistintos()),
                 Math.max(relevancia, outro.relevancia()),

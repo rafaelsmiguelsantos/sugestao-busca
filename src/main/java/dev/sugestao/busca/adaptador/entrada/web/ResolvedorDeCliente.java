@@ -1,6 +1,7 @@
 package dev.sugestao.busca.adaptador.entrada.web;
 
 import dev.sugestao.busca.dominio.Cliente;
+import dev.sugestao.busca.dominio.Relacionamento;
 import dev.sugestao.busca.dominio.Segmento;
 import org.springframework.core.MethodParameter;
 import org.springframework.web.bind.support.WebDataBinderFactory;
@@ -24,6 +25,7 @@ public class ResolvedorDeCliente implements HandlerMethodArgumentResolver {
 
     static final String CABECALHO_ID = "X-Cliente-Id";
     static final String CABECALHO_SEGMENTO = "X-Cliente-Segmento";
+    static final String CABECALHO_RELACIONAMENTO = "X-Cliente-Relacionamento";
 
     @Override
     public boolean supportsParameter(MethodParameter parametro) {
@@ -39,12 +41,14 @@ public class ResolvedorDeCliente implements HandlerMethodArgumentResolver {
 
         String id = requisicao.getHeader(CABECALHO_ID);
         String segmento = requisicao.getHeader(CABECALHO_SEGMENTO);
+        String relacionamento = requisicao.getHeader(CABECALHO_RELACIONAMENTO);
 
         // Sem identificação não há erro: há cliente anônimo. Ele recebe a lista
         // popular do segmento, que é exatamente o que o desenho prevê para
         // perfil indisponível.
         return new Cliente(
                 id == null || id.isBlank() ? "anonimo" : id,
-                Segmento.de(segmento));
+                Segmento.de(segmento),
+                Relacionamento.de(relacionamento));
     }
 }

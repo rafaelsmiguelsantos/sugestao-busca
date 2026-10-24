@@ -16,14 +16,14 @@ class PeneiraTest {
     @Test
     @DisplayName("não oferece de novo o produto que o cliente já contratou")
     void removeProdutoContratado() {
-        var perfil = new Perfil(List.of(), Set.of(), Set.of("CDB"), Set.of(), true);
+        var perfil = new Perfil(List.of(), Set.of(), Set.of("CDB"), Set.of(), SituacaoDaConta.ATIVA, true);
 
         var sobrou = peneira.aplicar(
                 List.of(Candidatos.produto("CDB", "CDB", false),
                         Candidatos.produto("Tesouro Direto", "TESOURO", false)),
                 perfil);
 
-        assertThat(sobrou).extracting(Candidato::termo).containsExactly("Tesouro Direto");
+        assertThat(sobrou.sobreviventes()).extracting(Candidato::termo).containsExactly("Tesouro Direto");
     }
 
     @Test
@@ -34,7 +34,7 @@ class PeneiraTest {
                         Candidatos.produto("extrato da conta", "", false)),
                 Perfil.NEUTRO);
 
-        assertThat(sobrou).extracting(Candidato::termo).containsExactly("extrato da conta");
+        assertThat(sobrou.sobreviventes()).extracting(Candidato::termo).containsExactly("extrato da conta");
     }
 
     @Test
@@ -42,10 +42,60 @@ class PeneiraTest {
     void elegibilidadeSemProdutoUsaOTermo() {
         var candidato = Candidatos.produto("portabilidade de salário", "", true);
         var concedida = new Perfil(List.of(), Set.of(), Set.of(),
-                Set.of("portabilidade de salario"), true);
+                Set.of("portabilidade de salario"), SituacaoDaConta.ATIVA, true);
 
-        assertThat(peneira.aplicar(List.of(candidato), Perfil.NEUTRO)).isEmpty();
-        assertThat(peneira.aplicar(List.of(candidato), concedida)).hasSize(1);
+        assertThat(peneira.aplicar(List.of(candidato), Perfil.NEUTRO).sobreviventes()).isEmpty();
+        assertThat(peneira.aplicar(List.of(candidato), concedida).sobreviventes()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("conta em atraso não recebe oferta de crédito novo")
+    void vetaCreditoNovoParaContaInadimplente() {
+        var emprestimo = Candidatos.comRestricoes("empréstimo pessoal", "EMPRESTIMO",
+                new Restricoes(false, true, false));
+        var renegociar = Candidatos.comRestricoes("renegociar dívida", "RENEGOCIACAO",
+                new Restricoes(false, false, false));
+
+        var negativado = new Perfil(List.of(), Set.of(), Set.of(), Set.of(),
+                SituacaoDaConta.INADIMPLENTE, true);
+
+        var peneirada = peneira.aplicar(List.of(emprestimo, renegociar), negativado);
+
+        // O crédito novo sai; o caminho que resolve fica. Esconder a busca
+        // inteira de quem está em atraso seria a decisão errada.
+        assertThat(peneirada.sobreviventes()).extracting(Candidato::termo)
+                .containsExactly("renegociar dívida");
+        assertThat(peneirada.descartes()).singleElement()
+                .extracting(Descarte::motivo).isEqualTo(MotivoDeDescarte.CONTA_INADIMPLENTE);
+    }
+
+    @Test
+    @DisplayName("o mesmo crédito aparece normalmente para conta ativa")
+    void creditoNovoApareceParaContaAtiva() {
+        var emprestimo = Candidatos.comRestricoes("empréstimo pessoal", "EMPRESTIMO",
+                new Restricoes(false, true, false));
+        var ativa = new Perfil(List.of(), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true);
+
+        assertThat(peneira.aplicar(List.of(emprestimo), ativa).sobreviventes()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("operação que exige conta operante some com conta bloqueada — e com conta desconhecida")
+    void exigeContaOperante() {
+        var transferir = Candidatos.comRestricoes("transferência TED", "",
+                new Restricoes(false, false, true));
+
+        var bloqueada = new Perfil(List.of(), Set.of(), Set.of(), Set.of(),
+                SituacaoDaConta.BLOQUEADA, true);
+
+        assertThat(peneira.aplicar(List.of(transferir), bloqueada).sobreviventes()).isEmpty();
+
+        // Falha fechada: sem perfil, a situação é DESCONHECIDA e a operação
+        // condicionada também não aparece.
+        assertThat(peneira.aplicar(List.of(transferir), Perfil.NEUTRO).sobreviventes()).isEmpty();
+
+        var ativa = new Perfil(List.of(), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true);
+        assertThat(peneira.aplicar(List.of(transferir), ativa).sobreviventes()).hasSize(1);
     }
 
     @Test
@@ -56,7 +106,7 @@ class PeneiraTest {
                         Candidatos.doIndice("pagar boleto", 1.0, PISO)),
                 Perfil.NEUTRO);
 
-        assertThat(sobrou).extracting(Candidato::termo).containsExactly("pagar boleto");
+        assertThat(sobrou.sobreviventes()).extracting(Candidato::termo).containsExactly("pagar boleto");
     }
 
     @Test
@@ -65,8 +115,8 @@ class PeneiraTest {
         // Zero clientes distintos: ninguém mais digitou isto, e é exatamente
         // por isso que ele só pode voltar para quem digitou.
         var meuHistorico = new Candidato("consultar saldo da conta 12345 6", "",
-                "/busca", "busca", "", false, List.of(), 0, 1.0, Origem.HISTORICO);
+                "/busca", "busca", "", Restricoes.NENHUMA, List.of(), 0, 1.0, Origem.HISTORICO);
 
-        assertThat(peneira.aplicar(List.of(meuHistorico), Perfil.NEUTRO)).hasSize(1);
+        assertThat(peneira.aplicar(List.of(meuHistorico), Perfil.NEUTRO).sobreviventes()).hasSize(1);
     }
 }

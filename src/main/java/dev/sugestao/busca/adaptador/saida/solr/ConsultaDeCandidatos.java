@@ -1,7 +1,7 @@
 package dev.sugestao.busca.adaptador.saida.solr;
 
+import dev.sugestao.busca.dominio.ContextoDeBusca;
 import dev.sugestao.busca.dominio.Prefixo;
-import dev.sugestao.busca.dominio.Segmento;
 import org.apache.solr.client.solrj.request.SolrQuery;
 
 import java.util.List;
@@ -27,7 +27,7 @@ public class ConsultaDeCandidatos {
         this.tiposSugeriveis = List.copyOf(tiposSugeriveis);
     }
 
-    public SolrQuery montar(Prefixo prefixo, Segmento segmento, int limite) {
+    public SolrQuery montar(Prefixo prefixo, ContextoDeBusca contexto, int limite) {
         var query = new SolrQuery();
 
         // ------------------------------------------------------------------
@@ -46,7 +46,12 @@ public class ConsultaDeCandidatos {
         query.addFilterQuery("tipo:(" + String.join(" OR ", tiposSugeriveis) + ")");
         query.addFilterQuery("vigencia_inicio_dt:[* TO NOW]");
         query.addFilterQuery("vigencia_fim_dt:[NOW TO *]");
-        query.addFilterQuery("{!terms f=segmento_ss}" + segmento.name());
+
+        // Segmento e faixa vêm do token. São os dois unicos cortes de publico
+        // que cabem aqui, e cabem exatamente porque nao dependem do perfil:
+        // (prefixo, segmento, relacionamento) e uma chave de cache estavel.
+        query.addFilterQuery("{!terms f=segmento_ss}" + contexto.segmento().name());
+        query.addFilterQuery("{!terms f=relacionamento_ss}" + contexto.relacionamento().name());
 
         // O piso de k-anonimato é fq, nunca pós-filtro: um termo abaixo dele
         // não chega a pontuar, nem a ser contado. Afrouxar este número é o
@@ -54,10 +59,10 @@ public class ConsultaDeCandidatos {
         // de queda de relevância.
         query.addFilterQuery("clientes_distintos_i:[" + pisoKAnonimato + " TO *]");
 
-        // Produto já contratado e elegibilidade seriam fq aqui se o perfil
-        // chegasse antes da consulta. Ele não chega — as duas leituras correm
-        // em paralelo — então esse corte acontece na Peneira, sobre vinte
-        // candidatos e dois milissegundos de CPU.
+        // Produto contratado, elegibilidade e situação da conta seriam fq aqui
+        // se o perfil chegasse antes da consulta. Ele não chega — as duas
+        // leituras correm em paralelo — então esse corte acontece na Peneira,
+        // sobre vinte candidatos e dois milissegundos de CPU.
 
         // ------------------------------------------------------------------
         // 3 · INCLINAR — comportamento entra aqui
@@ -79,8 +84,8 @@ public class ConsultaDeCandidatos {
 
         query.setRows(limite);
         query.setFields("termo", "rotulo_s", "destino_s", "jornada_s", "tipo",
-                "produto_alvo_s", "exige_elegibilidade_b", "gatilho_ss",
-                "clientes_distintos_i", "score");
+                "produto_alvo_s", "exige_elegibilidade_b", "veta_inadimplencia_b",
+                "exige_conta_ativa_b", "gatilho_ss", "clientes_distintos_i", "score");
 
         return query;
     }
