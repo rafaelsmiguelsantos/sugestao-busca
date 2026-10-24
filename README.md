@@ -22,6 +22,22 @@ scripts apontam o `SOLR_JAVA_HOME` para o JDK 25 apenas no processo que sobem.
 
 ## Subir o ambiente
 
+### Uma vez só: política de execução
+
+O padrão do Windows é `Restricted` e nenhum `.ps1` deste repositório roda. Não há
+política de grupo por cima, então isto resolve de vez — terminal normal, sem admin:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+`RemoteSigned` deixa rodar script local e continua exigindo assinatura em script
+baixado. Se preferir não mudar a política, dá para rodar cada um avulso:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\solr-local.ps1 start
+```
+
 ### Solr
 
 Hoje, do zip — não há runtime de container nesta máquina:
@@ -58,6 +74,14 @@ Para habilitar, em um PowerShell **aberto como Administrador**:
 O script habilita a **Virtual Machine Platform** e o **WSL 2** — é exatamente o que
 o instalador do Docker Desktop reclama faltar. O usuário desta máquina é
 administrador local, então o UAC pede só confirmação, sem senha.
+
+Se o terminal elevado ainda estiver com a política `Restricted`, não vale a pena
+contornar por causa de um comando. O script inteiro se resume a isto, e dá para
+digitar direto:
+
+```powershell
+wsl --install --no-distribution
+```
 
 Depois: reiniciar, rodar de novo o instalador do Docker Desktop (**x86_64**, não o
 Arm), e então, de volta a um terminal normal:
