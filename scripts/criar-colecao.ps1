@@ -4,7 +4,7 @@
     Funciona igual contra o Solr do zip (scripts\solr-local.ps1 start) e contra o
     do container (docker compose up -d), porque os dois partem do configset _default.
 
-        pwsh scripts\criar-colecao.ps1
+        .\scripts\criar-colecao.ps1
 
     Rodar de novo depois de ter dado certo reporta "already exists" campo a campo.
     Isso e esperado: a Schema API nao e idempotente. Para comecar do zero, apague
@@ -39,7 +39,7 @@ for ($i = 0; $i -lt $EsperaSegundos; $i++) {
 }
 Write-Host ''
 if (-not $pronto) {
-    throw "Solr nao respondeu em $EsperaSegundos s. Suba com 'pwsh scripts\solr-local.ps1 start' ou 'docker compose up -d'."
+    throw "Solr nao respondeu em $EsperaSegundos s. Suba com '.\scripts\solr-local.ps1 start' ou 'docker compose up -d'."
 }
 
 # --- 2. criar o core, se ainda nao existir ---------------------------------

@@ -27,11 +27,11 @@ scripts apontam o `SOLR_JAVA_HOME` para o JDK 25 apenas no processo que sobem.
 Hoje, do zip — não há runtime de container nesta máquina:
 
 ```powershell
-pwsh scripts\solr-local.ps1 start
-pwsh scripts\criar-colecao.ps1
+.\scripts\solr-local.ps1 start
+.\scripts\criar-colecao.ps1
 ```
 
-Painel em <http://localhost:8983/solr>. Para derrubar: `pwsh scripts\solr-local.ps1 stop`.
+Painel em <http://localhost:8983/solr>. Para derrubar: `.\scripts\solr-local.ps1 stop`.
 
 ### A aplicação
 
@@ -52,14 +52,19 @@ fazer a partir daqui.
 Para habilitar, em um PowerShell **aberto como Administrador**:
 
 ```powershell
-wsl --install
+.\scripts\habilitar-docker.ps1
 ```
 
-Reiniciar, instalar o Docker Desktop, e então, de volta a um terminal normal:
+O script habilita a **Virtual Machine Platform** e o **WSL 2** — é exatamente o que
+o instalador do Docker Desktop reclama faltar. O usuário desta máquina é
+administrador local, então o UAC pede só confirmação, sem senha.
+
+Depois: reiniciar, rodar de novo o instalador do Docker Desktop (**x86_64**, não o
+Arm), e então, de volta a um terminal normal:
 
 ```powershell
 docker compose up -d
-pwsh scripts\criar-colecao.ps1
+.\scripts\criar-colecao.ps1
 ```
 
 O `criar-colecao.ps1` é o mesmo nos dois caminhos — ele fala com `localhost:8983`

@@ -9,13 +9,13 @@
       1. Menu Iniciar > digite "terminal" > Ctrl+Shift+Enter
          (ou clique com o botao direito neste arquivo > Executar com o PowerShell
           a partir de um terminal ja elevado)
-      2. pwsh scripts\habilitar-docker.ps1
+      2. .\scripts\habilitar-docker.ps1
       3. Reiniciar o computador
       4. Rodar de novo o instalador do Docker Desktop (x86_64, nao o Arm)
 
     Depois disso, de volta a um terminal normal:
       docker compose up -d
-      pwsh scripts\criar-colecao.ps1
+      .\scripts\criar-colecao.ps1
 
     Isto e o unico passo do projeto que exige privilegio de administrador.
     Nada mais aqui precisa — o Solr do zip (scripts\solr-local.ps1) ja roda sem.

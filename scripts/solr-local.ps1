@@ -3,9 +3,9 @@
     E o caminho usado enquanto nao houver runtime de container nesta maquina.
     Mesma porta e mesma colecao do compose.yaml, entao o resto do projeto nao muda.
 
-        pwsh scripts\solr-local.ps1 start
-        pwsh scripts\solr-local.ps1 status
-        pwsh scripts\solr-local.ps1 stop
+        .\scripts\solr-local.ps1 start
+        .\scripts\solr-local.ps1 status
+        .\scripts\solr-local.ps1 stop
 
     Painel: http://localhost:8983/solr
 #>
