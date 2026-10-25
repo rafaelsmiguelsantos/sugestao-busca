@@ -450,14 +450,18 @@ HTTP 429  application/problem+json
 
       <h3>A conta do ranking</h3>
       <div class="bloco">
-<pre><span class="cm">relevancia_final = relevancia_normalizada × fator</span>
+<pre><span class="cm">relevancia_final = relevancia_normalizada × min(3.6, promocoes) × fadiga</span>
 
-fator = 1.00
-      × 1.60   <span class="cm">se a jornada do candidato é a líder</span>
-      × 1.25   <span class="cm">e, dentro dela, se ele empurra um produto</span>
-      × (1 + afinidade × 0.5)   <span class="cm">afinidade desta pessoa, 0 a 1</span>
+promocoes = 1.00
+          × 1.60   <span class="cm">se a jornada do candidato é a líder</span>
+          × 1.25   <span class="cm">e, dentro dela, se ele empurra um produto</span>
+          × (1 + afinidade_jornada × 0.50)   <span class="cm">0 a 1</span>
+          × (1 + afinidade_produto × 0.20)   <span class="cm">0 a 1, piso de evidência menor</span>
+          × (1 + tendencia_excedente × 0.15) <span class="cm">janela de 7 d contra a de 30 d</span>
 
-<span class="cm">teto: 1.60 × 1.25 × 1.50 = 3.00</span></pre>
+fadiga = 1.00 ... 0.60   <span class="cm">exibida muitas vezes e nunca clicada</span>
+
+<span class="cm">teto declarado: 3.60. A ordem importa — promover, limitar, rebaixar.</span></pre>
       </div>
 
       <p>
@@ -469,11 +473,21 @@ fator = 1.00
         <table>
           <thead><tr><th>linha observada</th><th>conta</th></tr></thead>
           <tbody>
-            <tr><td class="n">r=2,0</td><td class="n">1,0 × 1,6 × 1,25 — líder + produto, sem afinidade</td></tr>
-            <tr><td class="n">r=3,0</td><td class="n">1,0 × 1,6 × 1,25 × 1,5 — a mesma pessoa, já com afinidade</td></tr>
+            <tr><td class="n">r=2,0</td><td class="n">1,0 × 1,6 × 1,25 — líder + produto, sem comportamento</td></tr>
+            <tr><td class="n">r=3,0</td><td class="n">× 1,5 — a mesma pessoa, com afinidade de jornada</td></tr>
+            <tr><td class="n">r=3,6</td><td class="n">× 1,2 — e com afinidade no <em>produto</em> específico</td></tr>
+            <tr><td class="n">r=1,8</td><td class="n">3,6 × 0,6 — no teto das promoções e com fadiga no piso</td></tr>
             <tr><td class="n">r=0,15</td><td class="n">termo do log: normalizado e <strong>sem fator nenhum</strong></td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="nota">
+        <strong>O teto é declarado, não emergente — e isso conserta um defeito.</strong> Ele era 3,0
+        porque <code>1,6 × 1,25 × 1,5</code> dá 3,0, e esse número não estava escrito em lugar
+        nenhum. Com ele, uma linha com afinidade máxima de jornada <em>já estava no teto</em>, e a
+        afinidade por produto multiplicava um valor que o limite cortava de volta: os dois produtos
+        saíam em 3,0 e o desempate não acontecia. O sinal não ficava fraco, ficava <strong>inerte</strong>.
       </div>
 
       <div class="nota">

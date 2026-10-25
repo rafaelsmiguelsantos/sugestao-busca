@@ -1,140 +1,231 @@
 # sugestao-busca
 
-Camada de sugestão de busca parametrizada por perfil e comportamento, sobre Solr.
-Implementa o desenho de solução *Sugestão de busca no app*.
+**Camada de sugestão de busca que decide qual oferta apresentar, não quais
+palavras completar.** Sobre Apache Solr, com estado da conta, faixa de
+relacionamento e comportamento da pessoa entrando na decisão — em 30 ms, e com o
+motivo de cada ausência registrado.
 
-Este repositório é o ambiente de desenvolvimento local do POC. **Nada aqui usa
-dado real:** o vocabulário é sintético, os perfis são falsos e em memória, e não
-há segredo nenhum versionado — nem no perfil `local`.
-
-A pergunta que o serviço responde não é "quais palavras completam o que a pessoa
-digitou". É **qual oferta apresentar a esta pessoa agora** — com o estado da
-conta, a faixa de relacionamento e o comportamento dela entrando na decisão, e
-com o motivo de cada ausência registrado.
-
-**Começando daqui:**
+[![Java](https://img.shields.io/badge/Java-25-b07219)](https://openjdk.org/projects/jdk/25/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6db33f)](https://spring.io/projects/spring-boot)
+[![Apache Solr](https://img.shields.io/badge/Apache%20Solr-10.0-d9411e)](https://solr.apache.org/)
+[![Testes](https://img.shields.io/badge/testes-167%20verdes-success)](#como-contribuir)
+[![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-blue)](LICENSE)
 
 | se você quer | vá para |
 |---|---|
-| chamar a API | [`docs/guia-api.html`](docs/guia-api.html) — guia de integração em 10 passos |
-| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 22 decisões, com o que foi recusado e por quê |
+| **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
+| **rodar na sua máquina** | [Começar](#começar) — cinco passos |
+| clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 36 requisições em 7 pastas |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 22 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
-| rodar na sua máquina | [Subir o ambiente](#subir-o-ambiente), abaixo |
-| clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) |
+| saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 
-Java 25, Spring Boot 4.1, Apache Solr 10, arquitetura hexagonal. Os comentários do
-código registram o raciocínio e o que foi descartado, não o óbvio — é deliberado,
-e é metade do que este repositório tem a dizer.
+> Arquitetura hexagonal, e os comentários do código registram o raciocínio e o que
+> foi descartado — não o óbvio. É deliberado, e é metade do que este repositório
+> tem a dizer.
 
-## A API
+## O problema que isto resolve
 
-| rota | o que faz | escopo exigido |
-|---|---|---|
-| `GET /v1/sugestoes` | a lista, e `melhorOferta` com o ID acionável no topo | `sugestao:ler` |
-| `POST /v1/ofertas` | a jornada dona cadastra a própria oferta, idempotente | `ofertas:escrever` |
-| `GET /v1/ofertas/{id}` | o estado gravado, para conferência | `ofertas:ler` |
-| `POST /v1/eventos` | impressão, clique e adesão — com posição | `eventos:escrever` |
-| `POST /v1/aprendizado/rodar` | roda a agregação agora (só no perfil `local`) | `aprendizado:executar` |
-| `GET /actuator/health` | saúde | — pública |
+Numa caixa de busca de app bancário, autocompletar texto é a parte fácil e a parte
+que menos importa. O que o negócio precisa saber é **qual oferta mostrar**, e isso
+não depende só do que foi digitado:
 
-Tudo o mais é negado por padrão. Ver *Autenticação e autorização* abaixo.
+> Duas pessoas digitam `consignad`. Uma tem a elegibilidade concedida; a outra
+> não. **Elas não podem receber a mesma lista** — e a diferença não é de
+> relevância textual, é de estado de conta.
 
-```jsonc
-// GET /v1/sugestoes?q=consignad   (cliente elegível)
-{
-  "prefixo": "consignad",
-  "degradada": false,
-  "melhorOferta": {
-    "ofertaId": "OFR-CREDITO-CONSIGNADO",   // o que a jornada aciona
-    "produtoAlvo": "CONSIGNADO",
-    "jornada": "credito",
-    "posicao": 0                            // liga a resposta à impressão
-  },
-  "itens": [ /* cada linha com ofertaId quando é oferta, "" quando não é */ ]
-}
-```
-
-A mesma letra, duas contas, e é aqui que o desenho se justifica:
-
-| cliente | jornada líder | topo da lista | `melhorOferta` |
+| | jornada líder | topo da lista | `melhorOferta` |
 |---|---|---|---|
-| elegível | `credito` | **crédito consignado** (o produto) | `OFR-CREDITO-CONSIGNADO` |
-| sem elegibilidade | `ajuda` | como funciona o consignado (o artigo) | — |
+| elegível | `credito` | **crédito consignado** — o produto | `OFR-CREDITO-CONSIGNADO` |
+| sem elegibilidade | `ajuda` | como funciona o consignado — o artigo | *ausente* |
 
-A segunda linha não é a API falhando: quem não pode contratar recebe a
-explicação, não a oferta. E `melhorOferta` ausente é **informação**, não erro.
+A segunda linha não é a API falhando. Quem não pode contratar recebe a explicação,
+não a oferta — e `melhorOferta` ausente é **informação**, não erro. Com
+`?explicar=true` a resposta diz `SEM_ELEGIBILIDADE` e o nome do produto que foi
+removido.
 
-**Quatro formas de bater nos endpoints**, as mesmas chamadas:
-[`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) (REST Client do VS
-Code), [`requisicoes/bater.ps1`](requisicoes/bater.ps1) (terminal),
-[`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json)
-(Postman, para clicar e explorar) e
-[`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json)
-(newman, 56 asserções).
+Esse é o eixo do projeto: a busca decide com **estado da conta, faixa de
+relacionamento e comportamento da pessoa**, em 30 ms, e registra o motivo de cada
+ausência. Um autocomplete comum não tem onde colocar nenhuma dessas três coisas.
 
-**As decisões de desenho, com o que foi recusado e por quê, estão em
-[`docs/decisoes.md`](docs/decisoes.md).**
+### O que é
 
-## O que já está instalado nesta máquina
+Um POC funcional e completo: API REST, índice Solr, caminho de aprendizado,
+autenticação, resiliência e observabilidade. Roda inteiro numa máquina.
 
-O projeto foi montado sem privilégio de administrador, e por isso tudo abaixo do
-Docker mora em pastas do usuário, fora do `Program Files`.
+### O que não é
 
-| | versão | onde |
+Não é produto. **Nenhum dado é real:** o vocabulário é sintético, os perfis são
+falsos e vivem em memória, e não há segredo versionado. O perfil em memória é
+explicitamente o lugar onde entraria um DynamoDB; a agregação em memória é onde
+entraria um job de janela deslizante. Os limites estão listados em
+[Limitações conhecidas](#limitações-conhecidas).
+
+---
+
+## Começar
+
+### Requisitos
+
+| | versão mínima | nota |
 |---|---|---|
-| Temurin JDK | 25.0.4 LTS | `C:\Users\migue\tools\jdk-25` |
-| Apache Solr | 10.0.0 (com módulo `ltr`) | `C:\Users\migue\tools\solr-10.0.0` |
-| PortableGit | 2.56.0 | `C:\Users\migue\tools\PortableGit` |
-| Maven | via `mvnw`, baixado na primeira build | — |
-| Docker Desktop | 29.9.2, com WSL 2 | instalado em 24/10/2026 |
+| **JDK** | 21 — testado em **Temurin 25** | o Solr 10 exige 21+; o projeto compila com `--release 25` |
+| **Apache Solr** | 10.0.0 | os scripts baixam e sobem a partir do zip, sem admin |
+| **Maven** | — | via `mvnw`, baixado na primeira build |
+| **PowerShell** | 5.1 | os scripts são compatíveis com o que vem no Windows |
+| **Docker** | opcional | alternativa ao Solr do zip — ver [Solr em Docker](#solr-em-docker) |
 
-O JDK 17 continua sendo o padrão do sistema. O Solr 10 exige Java 21+, então os
-scripts apontam o `SOLR_JAVA_HOME` para o JDK 25 apenas no processo que sobem.
-
-## Subir o ambiente
-
-### Uma vez só: política de execução
-
-O padrão do Windows é `Restricted` e nenhum `.ps1` deste repositório roda. Não há
-política de grupo por cima, então isto resolve de vez — terminal normal, sem admin:
+No Windows, a política de execução padrão é `Restricted` e nenhum `.ps1` roda.
+Uma vez só, em terminal normal, sem admin:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 `RemoteSigned` deixa rodar script local e continua exigindo assinatura em script
-baixado. Se preferir não mudar a política, dá para rodar cada um avulso:
+baixado. Quem preferir não mudar a política roda cada um avulso com
+`powershell -ExecutionPolicy Bypass -File .\scripts\...`.
+
+### Cinco passos até a primeira resposta
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\solr-local.ps1 start
-```
+# 1 · clonar
+git clone https://github.com/rafaelsmiguelsantos/sugestao-busca.git
+cd sugestao-busca
 
-### Solr
+# 2 · o segredo de assinatura do token. NÃO há valor padrão:
+#     sem esta variável a aplicação recusa subir, de propósito.
+$env:SUGESTAO_SEGREDO = 'troque-isto-por-ao-menos-32-bytes-proprios'
 
-Do zip, sem container e sem admin:
-
-```powershell
+# 3 · Solr: baixa, sobe, cria a coleção e aplica o schema
 .\scripts\solr-local.ps1 start
 .\scripts\criar-colecao.ps1
+.\scripts\semear-vocabulario.ps1        # vocabulário sintético + catálogo
+
+# 4 · a aplicação, no perfil de demonstração
+$env:JAVA_HOME = '<caminho do seu JDK 25>'
+.\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
+
+# 5 · um token e a primeira chamada
+$t = .\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado -Silencioso
+curl.exe -s "http://localhost:8080/v1/sugestoes?q=consignad&explicar=true" `
+  -H "Authorization: Bearer $t"
 ```
 
-Painel em <http://localhost:8983/solr>. Para derrubar: `.\scripts\solr-local.ps1 stop`.
+Saúde em <http://localhost:8080/actuator/health>, painel do Solr em
+<http://localhost:8983/solr>. Para derrubar o Solr:
+`.\scripts\solr-local.ps1 stop`.
 
-### A aplicação
+> **Por que o perfil `local`.** Ele liga `?explicar=true`, o gatilho manual de
+> aprendizado e prazos folgados, e autoriza as origens CORS dos empacotadores de
+> front-end. O perfil padrão não liga nada disso — o default que viaja no
+> repositório é o seguro, e ligar é decisão de quem roda.
 
-```powershell
-$env:JAVA_HOME = 'C:\Users\migue\tools\jdk-25'
-.\mvnw spring-boot:run
+### Oito perfis para experimentar
+
+A demonstração vem com oito clientes falsos, cada um exercitando uma parte
+diferente da decisão. Troque o `-ClienteId` e a mesma letra devolve outra lista.
+
+| cliente | conta | o que ele demonstra |
+|---|---|---|
+| `pf-novo` | ATIVA | linha de base, sem comportamento |
+| `pf-pix-recusado` | ATIVA | gatilho ativo há 2 h, afinidade com crédito |
+| `pf-investidor` | ATIVA | já contratou CDB — não recebe de novo |
+| `pf-sem-elegibilidade` | ATIVA | recebe o artigo, não a oferta |
+| `pf-negativado` | INADIMPLENTE | crédito novo é vetado; renegociação entra por gatilho |
+| `pf-bloqueado` | BLOQUEADA | operação que exige conta ativa desaparece |
+| `pf-uniclass` | ATIVA | faixa alta: vê oferta que o varejo não vê |
+| `pj-lojista` | ATIVA | outro segmento, outro vocabulário |
+
+---
+
+## A API
+
+| rota | o que faz | escopo exigido |
+|---|---|---|
+| `GET /v1/sugestoes` | a lista, e `melhorOferta` com o ID acionável no topo | `sugestao:ler` |
+| `POST /v1/eventos` | impressão, clique e adesão — com posição | `eventos:escrever` |
+| `POST /v1/ofertas` | a jornada dona cadastra a própria oferta, idempotente | `ofertas:escrever` |
+| `GET /v1/ofertas/{id}` | o estado gravado, para conferência | `ofertas:ler` |
+| `POST /v1/aprendizado/rodar` | roda a agregação agora (demonstração) | `aprendizado:executar` |
+| `GET /actuator/metrics` | qualidade de busca: zero-resultado, posição clicada | `metricas:ler` |
+| `GET /actuator/health` | saúde | — pública |
+
+**Tudo o mais é negado por padrão**, inclusive rota que não existe — que responde
+`403`, e não `404`, para não contar a quem sonda quais caminhos existem.
+
+### A resposta
+
+```jsonc
+// GET /v1/sugestoes?q=consignad
+{
+  "prefixo": "consignad",      // ecoe-o de volta para descartar resposta atrasada
+  "degradada": false,          // true = o perfil não carregou; lista é a popular
+
+  "melhorOferta": {
+    "ofertaId": "OFR-CREDITO-CONSIGNADO",   // o que a sua jornada aciona
+    "produtoAlvo": "CONSIGNADO",
+    "jornada": "credito",
+    "destino": "/app/credito/consignado",
+    "posicao": 0,                           // liga a resposta à impressão
+    "relevancia": 3.0
+  },
+
+  "itens": [
+    // ofertaId preenchido = é oferta. "" = não é oferta, nunca "oferta sem id".
+  ]
+}
 ```
 
-Saúde em <http://localhost:8080/actuator/health>.
+Três coisas que poupam tempo de quem integra:
+
+- **`melhorOferta` é redundante de propósito.** Sem ela você varreria `itens`,
+  adivinharia que oferta é o item com `ofertaId` preenchido, e confiaria que a
+  ordem do array é o ranking — três suposições sobre a nossa implementação dentro
+  do seu código.
+- **`GET /v1/sugestoes` não devolve erro de aplicação.** Prefixo de uma letra, `q`
+  ausente, `limite=NaN` — tudo é `200` com lista vazia ou limitada. Escreva
+  tratamento de **lista vazia**, não de `4xx`.
+- **Não case nada contra `relevancia`.** Ela vai até 3,6, o teto é configurável e
+  os fatores mudam entre versões. Use a **posição**.
+
+**O guia completo de integração, em dez passos, está em
+[`docs/guia-api.md`](docs/guia-api.md)** — com o contrato de eventos, o cadastro de
+oferta, a tabela de códigos e a lista de armadilhas de front-end.
+
+### Quatro formas de bater nos endpoints
+
+| forma | para quê |
+|---|---|
+| [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) | **comece aqui**: 36 requisições em 7 pastas, para clicar e ler |
+| [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) | REST Client do VS Code, agrupado por pergunta |
+| [`requisicoes/bater.ps1`](requisicoes/bater.ps1) | terminal, sem extensão nenhuma |
+| [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json) | newman, 56 asserções — para CI |
+
+A collection de exploração assina os próprios tokens; só cole o seu
+`SUGESTAO_SEGREDO` na variável `segredo`.
+
+---
+
+## Documentação
+
+| documento | o que responde |
+|---|---|
+| [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
+| [`docs/decisoes.md`](docs/decisoes.md) | 22 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
+| [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
+| [`docs/guia-api.html`](docs/guia-api.html) | o mesmo guia em página, para compartilhar ou imprimir |
+
+O resto deste README é a parte de dentro: como a ordem é decidida, o que a
+autenticação recusa, como a resiliência se comporta com o índice fora do ar, e o
+que ficou de fora.
 
 ## Solr em Docker
 
-**O Docker Desktop passou a existir nesta máquina em 24/10/2026** — servidor
-29.9.2, com WSL 2 e a distribuição `docker-desktop`. Até então não havia runtime
-de container nenhum aqui, e este README dizia isso; o `scripts/habilitar-docker.ps1`
-existe por causa daquele momento e **não é mais necessário**. Fica no repositório
+Alternativa ao Solr do zip, para quem já tem container runtime. O
+`scripts/habilitar-docker.ps1` existe por causa de um momento em que esta máquina
+não tinha Docker e **não é mais necessário**. Fica no repositório
 como o registro de um pré-requisito que já foi resolvido.
 
 O `compose.yaml` aponta para `solr:10.0.0` com o módulo `ltr`, na mesma porta e
@@ -1148,6 +1239,10 @@ O registro completo, com o que foi recusado e por quê, está em
 10. Camada 4 (LTR). Agora há impressão com posição, que era o que faltava. O que
     falta é volume: com ~102 documentos não há o que um modelo aprenda.
 
+## Limitações conhecidas
+
+Nada aqui é descuido. Está escrito para não virar surpresa de quem clonou.
+
 ### O que é de mentira, e vale saber qual
 
 | peça | aqui | no desenho |
@@ -1200,4 +1295,56 @@ Resolver seria acrescentar um motivo novo em `Colheita` e carregá-lo até o JSO
 o que significa mudar a camada de aplicação para acomodar um detalhe de
 infraestrutura. Vale a pena no dia em que um cliente precisar reagir
 diferente — por exemplo, mantendo em tela a última lista boa em vez de esvaziar.
+
+### Outras quatro, declaradas
+
+**Viés de posição na fadiga.** Linha na posição 5 é vista menos que na 0, e a
+contagem de "exibiu e não clicou" trata as duas igual — a que já estava embaixo
+afunda mais rápido. Corrigir exige modelo de propensão.
+
+**A tendência não é verificável de ponta a ponta.** `ocorridoEm` é atribuído pelo
+servidor na ingestão, então não há como injetar evento de trinta dias atrás pela
+API pública. A matemática tem teste de unidade; o comportamento em produção só a
+métrica dirá.
+
+**Falta vocabulário coloquial.** `grana` devolve zero, e nenhuma distância de
+edição conserta sinônimo que não existe no catálogo.
+
+**Nenhum perfil de demonstração tem elegibilidade de `FINANCIAMENTO_*`.** As duas
+ofertas de financiamento são inalcançáveis pelos oito perfis. O conserto não é dar
+a elegibilidade: é um **teste** que falhe quando existir oferta que nenhum perfil
+alcança, para isso parar de ser descoberta manual.
+
+---
+
+## Como contribuir
+
+```powershell
+$env:JAVA_HOME = '<seu JDK 25>'
+.\mvnw test                                  # 167 testes
+.\scripts\cacar-flaky.ps1 -Rodadas 10        # caça teste instável sob carga
+.\requisicoes\sondar.ps1                     # 47 sondas adversariais
+npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json   # 56 asserções
+```
+
+Duas convenções que valem saber antes de abrir um PR:
+
+**Os comentários registram o porquê e o que foi recusado, não o quê.** Se um
+trecho tem comentário longo, provavelmente houve uma alternativa que parecia melhor
+e não era. Mudar o código sem ler o comentário tende a reintroduzir o defeito que
+ele descreve.
+
+**Teste que afirma menos do que quer não passa.** Três asserções deste projeto
+passavam por sorte — igualdade exata sobre valor com decaimento temporal — e a
+última só apareceu rodando a suíte doze vezes com os doze núcleos ocupados. Daí o
+`cacar-flaky.ps1`. Se um teste precisa de tolerância, vale perguntar antes se o
+problema não é a fonte de tempo.
+
+## Licença
+
+[MIT](LICENSE).
+
+O vocabulário, os perfis e as ofertas são sintéticos e inventados para a
+demonstração. Nenhum dado de cliente real, nenhum catálogo de produto real de
+instituição nenhuma.
 Enquanto nenhum cliente precisa, o log basta.
