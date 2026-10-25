@@ -17,6 +17,22 @@ public record ResultadoDoAprendizado(
         int termosPublicados,
         int retidosPeloPiso,
         int perfisAtualizados,
+
+        /**
+         * Quantos perfis tiveram o mapa de fadiga cortado pelo teto.
+         *
+         * <p>Existe para o teto não cortar em silêncio. Com o número à vista, a
+         * calibragem deixa de ser chute: <strong>zero numa base grande</strong>
+         * significa teto folgado e nada a fazer; <strong>a maioria dos
+         * perfis</strong> significa que ele está descartando sinal, e aí a
+         * conversa é sobre quanto o perfil pode pesar — não sobre se o número
+         * está bom.
+         *
+         * <p>É a mesma lógica de {@code retidosPeloPiso}: um limite que ninguém
+         * mede é um limite que alguém vai afrouxar por palpite.
+         */
+        int perfisNoTetoDeFadiga,
+
         List<String> exemplosRetidos) {
 
     public ResultadoDoAprendizado {
@@ -24,8 +40,8 @@ public record ResultadoDoAprendizado(
     }
 
     public String resumo() {
-        return "eventos=%d termos=%d publicados=%d retidos=%d perfis=%d"
+        return "eventos=%d termos=%d publicados=%d retidos=%d perfis=%d fadigaNoTeto=%d"
                 .formatted(eventosConsumidos, termosAvaliados, termosPublicados,
-                        retidosPeloPiso, perfisAtualizados);
+                        retidosPeloPiso, perfisAtualizados, perfisNoTetoDeFadiga);
     }
 }

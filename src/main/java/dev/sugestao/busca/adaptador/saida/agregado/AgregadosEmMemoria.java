@@ -47,6 +47,9 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
     private final AtomicInteger retidos = new AtomicInteger();
     private final int teto;
 
+    /** Quantos perfis bateram no teto de fadiga na rodada mais recente. */
+    private final AtomicInteger perfisNoTetoDeFadiga = new AtomicInteger();
+
     /**
      * De onde sai o "agora" desta classe.
      *
@@ -156,6 +159,8 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
     public List<ComportamentoDoCliente> comportamentos(
             Duration janelaDoHistorico, int tamanhoDoHistorico,
             PesosDeAfinidade pesos, PesosDeFadiga fadiga) {
+
+        perfisNoTetoDeFadiga.set(0);
 
         Instant agora = relogio.instant();
         Instant corteDoHistorico = agora.minus(janelaDoHistorico);
@@ -468,7 +473,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
      * já exibidos faria o perfil crescer com o vocabulário em vez de com o
      * comportamento.
      */
-    private static Map<String, Double> comoFadiga(
+    private Map<String, Double> comoFadiga(
             Map<String, int[]> exposicoes, PesosDeFadiga pesos) {
 
         if (exposicoes == null || exposicoes.isEmpty()) {
@@ -485,7 +490,30 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
                 fadigas.put(termo, fadiga);
             }
         });
-        return Map.copyOf(fadigas);
+
+        // O teto, e ele é CONTADO quando aperta.
+        //
+        // Cortar em silêncio seria o pior dos dois mundos: o perfil para de
+        // crescer e ninguém sabe se o número está generoso ou apertado. Com o
+        // contador, a rodada diz quantas pessoas bateram no teto — se for zero
+        // numa base grande, o teto é folgado; se for a maioria, está cortando
+        // sinal e o número precisa de discussão, não de chute.
+        var cortadas = pesos.maisCansados(Map.copyOf(fadigas));
+        if (cortadas.size() < fadigas.size()) {
+            perfisNoTetoDeFadiga.incrementAndGet();
+        }
+        return cortadas;
+    }
+
+    /**
+     * Quantos perfis bateram no teto de fadiga na última rodada.
+     *
+     * <p>Zerado no início de cada {@code comportamentos}, porque a pergunta é
+     * "quantos agora", não "quantos desde que o processo subiu".
+     */
+    @Override
+    public int perfisNoTetoDeFadiga() {
+        return perfisNoTetoDeFadiga.get();
     }
 
     @Override

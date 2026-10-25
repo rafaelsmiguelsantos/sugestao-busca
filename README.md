@@ -8,7 +8,7 @@ motivo de cada ausência registrado.
 [![Java](https://img.shields.io/badge/Java-25-b07219)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6db33f)](https://spring.io/projects/spring-boot)
 [![Apache Solr](https://img.shields.io/badge/Apache%20Solr-10.0-d9411e)](https://solr.apache.org/)
-[![Testes](https://img.shields.io/badge/testes-167%20verdes-success)](#como-contribuir)
+[![Testes](https://img.shields.io/badge/testes-173%20verdes-success)](#como-contribuir)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-blue)](LICENSE)
 
 | se você quer | vá para |
@@ -16,7 +16,7 @@ motivo de cada ausência registrado.
 | **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 36 requisições em 7 pastas |
-| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 22 decisões, com o que foi **recusado** e por quê |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 23 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 
@@ -212,7 +212,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 | documento | o que responde |
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
-| [`docs/decisoes.md`](docs/decisoes.md) | 22 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/decisoes.md`](docs/decisoes.md) | 23 decisões de desenho, com o que foi **recusado** e por quê |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
 | [`docs/guia-api.html`](docs/guia-api.html) | o mesmo guia em página, para compartilhar ou imprimir |
@@ -1321,7 +1321,7 @@ alcança, para isso parar de ser descoberta manual.
 
 ```powershell
 $env:JAVA_HOME = '<seu JDK 25>'
-.\mvnw test                                  # 167 testes
+.\mvnw test                                  # 173 testes
 .\scripts\cacar-flaky.ps1 -Rodadas 10        # caça teste instável sob carga
 .\requisicoes\sondar.ps1                     # 47 sondas adversariais
 npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json   # 56 asserções

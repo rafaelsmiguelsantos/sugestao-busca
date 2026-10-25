@@ -47,4 +47,18 @@ public interface RepositorioDeAgregados {
             PesosDeAfinidade pesos, PesosDeFadiga fadiga);
 
     int eventosRetidos();
+
+    /**
+     * Quantos perfis tiveram o mapa de fadiga cortado pelo teto na rodada mais
+     * recente de {@link #comportamentos}.
+     *
+     * <p>Está na porta pelo mesmo motivo que {@code eventosRetidos}: é número que
+     * a rodada precisa relatar, e quem calcula é o agregador. O padrão é zero
+     * para implementação que não aplique teto nenhum.
+     *
+     * <p>Limite que ninguém mede é limite que alguém afrouxa por palpite.
+     */
+    default int perfisNoTetoDeFadiga() {
+        return 0;
+    }
 }

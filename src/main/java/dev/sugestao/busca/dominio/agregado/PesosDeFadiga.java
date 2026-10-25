@@ -2,6 +2,9 @@ package dev.sugestao.busca.dominio.agregado;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Quando uma linha exibida muitas vezes e nunca clicada passa a valer menos.
@@ -64,7 +67,25 @@ public record PesosDeFadiga(
         int impressoesParaOTeto,
 
         /** Depois disto, a fadiga é esquecida. */
-        Duration janela) {
+        Duration janela,
+
+        /**
+         * Quantos termos cansados cabem no perfil de uma pessoa.
+         *
+         * <p><strong>Este teto existe por causa do caminho de leitura, não do de
+         * escrita.</strong> O mapa de fadiga é o único sinal do perfil indexado
+         * por <em>termo</em> — histórico tem teto de 20, afinidade de jornada tem
+         * meia dúzia de chaves, afinidade de produto algumas dezenas. A fadiga
+         * ganha uma entrada por termo exibido cinco vezes e nunca clicado, e
+         * quem usa o app todo dia acumula indefinidamente.
+         *
+         * <p>O problema não é a memória do agregador: é que <strong>o perfil é
+         * lido a cada tecla</strong>. Perfil gordo são mais bytes na rede por
+         * requisição, multiplicados pelo volume de digitação — e num
+         * armazenamento de documento há limite de tamanho de item que, alcançado,
+         * não degrada: falha.
+         */
+        int tamanhoMaximo) {
 
     public PesosDeFadiga {
         if (impressoesMinimas < 1) {
@@ -77,6 +98,11 @@ public record PesosDeFadiga(
         }
         if (janela == null || janela.isZero() || janela.isNegative()) {
             throw new IllegalArgumentException("a janela da fadiga precisa ser positiva");
+        }
+        if (tamanhoMaximo < 1) {
+            throw new IllegalArgumentException(
+                    "teto de tamanho menor que 1 desligaria a fadiga por um caminho que nao diz "
+                            + "que a desligou; para desligar, zere o peso em PesosDeRanking");
         }
     }
 
@@ -102,7 +128,38 @@ public record PesosDeFadiga(
      * se produz um efeito que ninguém consegue prever lendo a configuração.
      */
     public static PesosDeFadiga padrao() {
-        return new PesosDeFadiga(5, 20, Duration.ofDays(30));
+        return new PesosDeFadiga(5, 20, Duration.ofDays(30), 50);
+    }
+
+    /**
+     * Os cinquenta termos mais cansados, e não os cinquenta primeiros.
+     *
+     * <p><strong>Qual descartar é a decisão, e ela não é arbitrária.</strong>
+     * Descartar fadiga baixa é invisível: 0,07 de fadiga vira fator 0,973, que
+     * não move linha nenhuma de lugar. Descartar fadiga alta custa o efeito
+     * inteiro. Então o corte é por valor, decrescente.
+     *
+     * <p>E o desempate é pelo <strong>termo</strong>, alfabético, não pela ordem
+     * de iteração do mapa. Sem isso, com mais termos no teto do que vagas — o que
+     * acontece quando muitos chegam a 1,0 —, quais sobrevivem mudaria entre
+     * rodadas conforme o `HashMap` resolvesse a ordem, e a lista da pessoa
+     * piscaria a cada quinze segundos sem que nenhum comportamento dela tivesse
+     * mudado. Instabilidade sem causa observável é a pior espécie.
+     *
+     * <p>A recência não entra no critério porque ela já está dentro do valor: a
+     * janela de trinta dias descarta o que é velho antes de a fadiga ser
+     * calculada.
+     */
+    public Map<String, Double> maisCansados(Map<String, Double> fadigas) {
+        if (fadigas.size() <= tamanhoMaximo) {
+            return fadigas;
+        }
+
+        return fadigas.entrySet().stream()
+                .sorted(Comparator.<Map.Entry<String, Double>>comparingDouble(e -> -e.getValue())
+                        .thenComparing(Map.Entry::getKey))
+                .limit(tamanhoMaximo)
+                .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     /**

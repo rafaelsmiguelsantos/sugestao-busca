@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -263,6 +264,58 @@ class AgregadosEmMemoriaTest {
         assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA))
                 .singleElement()
                 .satisfies(c -> assertThat(c.afinidadePorJornada()).containsOnlyKeys("credito"));
+    }
+
+    @Test
+    @DisplayName("o teto da fadiga corta o perfil, e a rodada conta quem bateu nele")
+    void tetoDaFadigaCortaEContabiliza() {
+        // O perfil é lido A CADA TECLA, e a fadiga é o único sinal dele indexado
+        // por termo — histórico tem teto de 20, afinidade de jornada tem meia
+        // dúzia de chaves. Sem teto aqui, quem usa o app todo dia acumula
+        // indefinidamente, e num volume de 100 mil requisições por minuto cada
+        // quilobyte a mais no perfil é tráfego multiplicado por isso.
+        var fadigaComTeto = new PesosDeFadiga(5, 20, Duration.ofDays(30), 3);
+
+        // Dez termos distintos, cada um exibido o bastante para cansar, nenhum
+        // clicado. Os de índice maior acumulam mais impressões, então cansam
+        // mais — é assim que sabemos QUAIS deveriam sobreviver.
+        var eventos = new ArrayList<EventoDeBusca>();
+        for (int t = 0; t < 10; t++) {
+            for (int i = 0; i <= 6 + t; i++) {
+                eventos.add(new EventoDeBusca(
+                        TipoDeEvento.SUGESTAO_EXIBIDA, CLIENTE, Segmento.PF, "",
+                        List.of("termo " + (char) ('a' + t)), 0, "", "", false, AGORA));
+            }
+        }
+        agregados.acumular(eventos);
+
+        var c = agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, fadigaComTeto)
+                .getFirst();
+
+        assertThat(c.fadigaPorTermo())
+                .as("o teto limita o tamanho do mapa")
+                .hasSize(3);
+
+        // Os três mais cansados são os três com mais impressões: h, i, j.
+        assertThat(c.fadigaPorTermo())
+                .as("sobrevivem os MAIS cansados, nao os primeiros encontrados")
+                .containsOnlyKeys("termo h", "termo i", "termo j");
+
+        // E o corte é CONTADO. Cortar em silêncio seria o pior dos dois mundos:
+        // o perfil para de crescer e ninguém sabe se o número está folgado ou
+        // apertado.
+        assertThat(agregados.perfisNoTetoDeFadiga())
+                .as("a rodada diz quantos perfis bateram no teto")
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("sem bater no teto, o contador fica em zero")
+    void semTetoContadorZerado() {
+        agregados.acumular(List.of(clique("credito")));
+        agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA);
+
+        assertThat(agregados.perfisNoTetoDeFadiga()).isZero();
     }
 
     @Test

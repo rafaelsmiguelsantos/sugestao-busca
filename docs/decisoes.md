@@ -914,6 +914,63 @@ amostra, e o script existe para a amostra poder crescer.
 
 ---
 
+## 23. Teto no mapa de fadiga, porque o perfil é lido a cada tecla
+
+**Decisão.** `fadigaPorTermo` guarda no máximo 50 entradas por pessoa — os 50
+termos mais cansados.
+
+**O defeito que isso conserta, e de onde ele apareceu.** Os outros três sinais do
+perfil têm tamanho limitado por construção: o histórico tem teto de 20 itens, a
+afinidade de jornada tem meia dúzia de chaves, a de produto algumas dezenas. A
+fadiga é o **único indexado por termo** — ela ganha uma entrada por termo exibido
+cinco vezes e nunca clicado, e quem usa o app todo dia acumula indefinidamente.
+
+Isso passou nas três revisões anteriores porque, no volume do POC, não aparece.
+Apareceu quando a pergunta virou "e se forem 60 milhões de requisições por dia,
+100 mil num minuto".
+
+**E o problema não é a memória do agregador — é o caminho de leitura.** O perfil é
+lido **a cada tecla**. Medido, com entrada de ~47 bytes:
+
+| termos | por leitura | a 1.667 req/s |
+|---|---|---|
+| 50 (com teto) | 2,3 KB | 3,7 MB/s |
+| 200 | 9,2 KB | 14,9 MB/s |
+| 2.000 | 91,8 KB | **149 MB/s** |
+
+E num armazenamento de documento há limite de tamanho de item que, alcançado, não
+degrada: **falha**. Um perfil que cresce sem teto é uma falha agendada para o
+cliente mais engajado da base — exatamente o que ninguém quer perder.
+
+**Qual descartar é a decisão, e ela não é arbitrária.** O corte é por valor,
+decrescente. Descartar fadiga baixa é invisível: 0,07 de fadiga vira fator 0,973, e
+isso não move linha nenhuma de lugar. Descartar fadiga alta custa o efeito inteiro.
+A recência não entra no critério porque já está dentro do valor — a janela de 30
+dias descarta o que é velho antes de a fadiga ser calculada.
+
+**O desempate é pelo termo, alfabético, e isto é a parte que mais importa.** Quando
+muitos termos chegam a 1,0 — o que acontece, porque 1,0 é o teto da curva — há mais
+candidatos que vagas. Se o desempate dependesse da ordem de iteração do `HashMap`,
+quais sobreviveriam mudaria entre rodadas, e **a lista da pessoa piscaria a cada
+quinze segundos sem que nenhum comportamento dela tivesse mudado**.
+
+Instabilidade sem causa observável é a pior espécie: ninguém reproduz, e o relato
+chega como "às vezes a sugestão muda sozinha". Há teste dedicado só a isso, com dez
+rodadas sobre mapas construídos em ordens diferentes.
+
+**O teto é contado, e cortar em silêncio seria pior que não cortar.** A rodada
+devolve `perfisNoTetoDeFadiga`. Com o número à vista a calibragem deixa de ser
+palpite: **zero numa base grande** significa teto folgado e nada a fazer; **a
+maioria dos perfis** significa que ele está descartando sinal, e aí a conversa é
+sobre quanto o perfil pode pesar — não sobre se 50 é um bom número. É a mesma lógica
+de `retidosPeloPiso`: limite que ninguém mede é limite que alguém afrouxa por
+palpite.
+
+**Verificado ao vivo:** 70 termos cansados para um cliente, rodada devolveu
+`perfisNoTetoDeFadiga: 1`, e a busca continuou respondendo normalmente.
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas

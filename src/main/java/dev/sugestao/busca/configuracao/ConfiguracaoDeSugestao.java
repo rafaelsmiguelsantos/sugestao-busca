@@ -309,7 +309,8 @@ public class ConfiguracaoDeSugestao {
                 new PesosDeFadiga(
                         fadiga.impressoesMinimas(),
                         fadiga.impressoesParaOTeto(),
-                        Duration.ofDays(fadiga.janelaDias())));
+                        Duration.ofDays(fadiga.janelaDias()),
+                        fadiga.tamanhoMaximo()));
     }
 
     @Bean

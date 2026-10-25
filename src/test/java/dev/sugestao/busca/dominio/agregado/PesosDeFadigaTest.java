@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -99,7 +100,7 @@ class PesosDeFadigaTest {
     @Test
     @DisplayName("piso de evidência zero é recusado na construção")
     void pisoZeroRecusado() {
-        assertThatThrownBy(() -> new PesosDeFadiga(0, 20, Duration.ofDays(30)))
+        assertThatThrownBy(() -> new PesosDeFadiga(0, 20, Duration.ofDays(30), 50))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("primeiro clique");
     }
@@ -125,8 +126,85 @@ class PesosDeFadigaTest {
     @Test
     @DisplayName("teto igual ao piso faria da fadiga um degrau, e é recusado")
     void degrauRecusado() {
-        assertThatThrownBy(() -> new PesosDeFadiga(5, 5, Duration.ofDays(30)))
+        assertThatThrownBy(() -> new PesosDeFadiga(5, 5, Duration.ofDays(30), 50))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("degrau");
+    }
+
+    // -----------------------------------------------------------------------
+    // Teto de tamanho: o perfil é lido a cada tecla
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("abaixo do teto, o mapa passa inteiro e sem cópia")
+    void abaixoDoTetoNaoMexe() {
+        var pesos = new PesosDeFadiga(5, 20, Duration.ofDays(30), 3);
+        var entrada = Map.of("a", 0.1, "b", 0.2);
+
+        assertThat(pesos.maisCansados(entrada)).isSameAs(entrada);
+    }
+
+    @Test
+    @DisplayName("acima do teto, sobrevivem os MAIS cansados")
+    void mantemOsMaisCansados() {
+        // Qual descartar é a decisão. Descartar fadiga baixa é invisível — 0,07
+        // vira fator 0,973 e não move linha de lugar. Descartar fadiga alta custa
+        // o efeito inteiro.
+        var pesos = new PesosDeFadiga(5, 20, Duration.ofDays(30), 2);
+
+        var entrada = Map.of(
+                "quase nada",  0.05,
+                "muito",       0.90,
+                "um pouco",    0.30,
+                "no teto",     1.00);
+
+        assertThat(pesos.maisCansados(entrada))
+                .containsOnlyKeys("no teto", "muito");
+    }
+
+    @Test
+    @DisplayName("empate é resolvido pelo termo, e o resultado não muda entre rodadas")
+    void desempateDeterministico() {
+        // ESTE É O CASO QUE IMPORTA, e o motivo não é elegância.
+        //
+        // Quando muitos termos chegam a 1,0 — o que acontece, porque 1,0 é o teto
+        // da curva —, há mais candidatos que vagas. Se o desempate dependesse da
+        // ordem de iteração do HashMap, quais sobreviveriam mudaria entre
+        // rodadas, e a lista da pessoa piscaria a cada quinze segundos sem que
+        // nenhum comportamento dela tivesse mudado.
+        //
+        // Instabilidade sem causa observável é a pior espécie: ninguém consegue
+        // reproduzir, e o relato chega como "às vezes a sugestão muda sozinha".
+        var pesos = new PesosDeFadiga(5, 20, Duration.ofDays(30), 3);
+
+        var todosNoTeto = new java.util.HashMap<String, Double>();
+        for (String t : new String[] {"eta", "beta", "alfa", "delta", "gama"}) {
+            todosNoTeto.put(t, 1.0);
+        }
+
+        var primeira = pesos.maisCansados(todosNoTeto);
+
+        // Dez rodadas sobre mapas construídos em ordens diferentes.
+        for (int i = 0; i < 10; i++) {
+            var outraOrdem = new java.util.LinkedHashMap<String, Double>();
+            var chaves = new java.util.ArrayList<>(todosNoTeto.keySet());
+            java.util.Collections.rotate(chaves, i);
+            chaves.forEach(k -> outraOrdem.put(k, 1.0));
+
+            assertThat(pesos.maisCansados(outraOrdem))
+                    .as("rodada %d", i)
+                    .containsExactlyInAnyOrderEntriesOf(primeira);
+        }
+
+        // E são os três primeiros em ordem alfabética.
+        assertThat(primeira).containsOnlyKeys("alfa", "beta", "delta");
+    }
+
+    @Test
+    @DisplayName("teto zero desligaria a fadiga sem dizer, e é recusado")
+    void tetoZeroRecusado() {
+        assertThatThrownBy(() -> new PesosDeFadiga(5, 20, Duration.ofDays(30), 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nao diz");
     }
 }

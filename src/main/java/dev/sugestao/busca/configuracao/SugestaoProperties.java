@@ -336,7 +336,14 @@ public record SugestaoProperties(
     public record Fadiga(
             int impressoesMinimas,
             int impressoesParaOTeto,
-            int janelaDias) {
+            int janelaDias,
+
+            /*
+             * Teto de termos cansados por pessoa. Existe por causa do caminho de
+             * LEITURA: o perfil e lido a cada tecla, e a fadiga e o unico sinal
+             * dele indexado por termo. Ver PesosDeFadiga.tamanhoMaximo.
+             */
+            int tamanhoMaximo) {
 
         public Fadiga {
             impressoesMinimas = impressoesMinimas <= 0 ? 5 : impressoesMinimas;
@@ -344,10 +351,11 @@ public record SugestaoProperties(
                     ? impressoesMinimas * 4
                     : impressoesParaOTeto;
             janelaDias = janelaDias <= 0 ? 30 : janelaDias;
+            tamanhoMaximo = tamanhoMaximo <= 0 ? 50 : tamanhoMaximo;
         }
 
         public static Fadiga padrao() {
-            return new Fadiga(5, 20, 30);
+            return new Fadiga(5, 20, 30, 50);
         }
     }
 
