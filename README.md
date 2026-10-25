@@ -3,13 +3,28 @@
 Camada de sugestão de busca parametrizada por perfil e comportamento, sobre Solr.
 Implementa o desenho de solução *Sugestão de busca no app*.
 
-Este repositório é o ambiente de desenvolvimento local do POC. Nada aqui usa dado
-real: o vocabulário é sintético e os perfis são falsos, em memória.
+Este repositório é o ambiente de desenvolvimento local do POC. **Nada aqui usa
+dado real:** o vocabulário é sintético, os perfis são falsos e em memória, e não
+há segredo nenhum versionado — nem no perfil `local`.
 
 A pergunta que o serviço responde não é "quais palavras completam o que a pessoa
 digitou". É **qual oferta apresentar a esta pessoa agora** — com o estado da
 conta, a faixa de relacionamento e o comportamento dela entrando na decisão, e
 com o motivo de cada ausência registrado.
+
+**Começando daqui:**
+
+| se você quer | vá para |
+|---|---|
+| chamar a API | [`docs/guia-api.html`](docs/guia-api.html) — guia de integração em 10 passos |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 22 decisões, com o que foi recusado e por quê |
+| integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
+| rodar na sua máquina | [Subir o ambiente](#subir-o-ambiente), abaixo |
+| clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) |
+
+Java 25, Spring Boot 4.1, Apache Solr 10, arquitetura hexagonal. Os comentários do
+código registram o raciocínio e o que foi descartado, não o óbvio — é deliberado,
+e é metade do que este repositório tem a dizer.
 
 ## A API
 
