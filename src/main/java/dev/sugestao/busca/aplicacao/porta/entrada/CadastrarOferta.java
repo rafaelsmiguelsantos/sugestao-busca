@@ -15,7 +15,18 @@ import java.util.Optional;
  */
 public interface CadastrarOferta {
 
-    ResultadoDoCadastro executar(ComandoDeCadastroDeOferta comando);
+    /**
+     * @param autorizacao de qual jornada o chamador é dono. A regra "a oferta
+     *                    tem de ser da jornada de quem cadastra" é aplicada
+     *                    aqui, na aplicação, e não no controller: ela é regra de
+     *                    negócio, e a borda só sabe traduzir token em
+     *                    {@link Autorizacao}. O efeito prático é que ela é
+     *                    testável sem HTTP, e continuaria valendo se o cadastro
+     *                    passasse a entrar por uma fila ou por um console.
+     * @throws JornadaNaoAutorizada quando a oferta é de outra jornada
+     * @throws dev.sugestao.busca.dominio.oferta.OfertaInvalida com todas as violações
+     */
+    ResultadoDoCadastro executar(ComandoDeCadastroDeOferta comando, Autorizacao autorizacao);
 
     /**
      * A oferta como o registro a guardou — para a jornada conferir que o que

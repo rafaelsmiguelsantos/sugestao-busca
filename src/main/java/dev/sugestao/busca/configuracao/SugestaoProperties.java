@@ -53,7 +53,43 @@ public record SugestaoProperties(
          * O disjuntor da porta de leitura. Protege a dependencia e o processo,
          * nao a requisicao — o prazo e que protege a requisicao.
          */
-        Disjuntor disjuntor) {
+        Disjuntor disjuntor,
+
+        /* Quem pode chamar o que. Ver ConfiguracaoDeSeguranca. */
+        Seguranca seguranca) {
+
+    /**
+     * Validação do token. Este serviço é servidor de recurso: valida e não
+     * emite.
+     *
+     * <p>{@code habilitada=false} abre todas as rotas e faz a identidade voltar
+     * a vir de cabeçalho. Existe para demonstrar sem emitir token, grita no log
+     * na subida, e nunca deve chegar a produção — é o único parâmetro deste
+     * arquivo cuja troca muda o serviço de "protegido" para "aberto".
+     */
+    public record Seguranca(boolean habilitada, String segredo, String emissor) {
+
+        public Seguranca {
+            emissor = emissor == null || emissor.isBlank()
+                    ? "https://sugestao-busca.dev"
+                    : emissor;
+            segredo = segredo == null ? "" : segredo;
+        }
+
+        /**
+         * O padrão é LIGADO com segredo vazio, o que faz a aplicação <em>não
+         * subir</em> sem um segredo configurado.
+         *
+         * <p>É a escolha deliberadamente inconveniente. Um segredo padrão
+         * embutido funcionaria em qualquer lugar, inclusive em produção, e
+         * assinaria tokens que qualquer pessoa com acesso a este repositório
+         * sabe forjar. Falhar na subida é ruidoso, acontece uma vez, e acontece
+         * para quem está configurando — não para quem está sendo atacado.
+         */
+        public static Seguranca padrao() {
+            return new Seguranca(true, "", "https://sugestao-busca.dev");
+        }
+    }
 
     /**
      * Quando parar de bater num índice que já respondeu que não está lá.

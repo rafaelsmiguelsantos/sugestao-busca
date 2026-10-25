@@ -84,7 +84,13 @@ public class ConfiguracaoDeCors implements WebMvcConfigurer {
                 // Os cabecalhos que o cliente precisa poder enviar. Content-Type
                 // entra porque application/json nao esta na lista segura.
                 .allowedHeaders(
+                        "Authorization",
                         "Content-Type",
+                        // Os tres de identidade so valem com a seguranca
+                        // desligada, mas continuam autorizados aqui: autorizar
+                        // um cabecalho que o servico ignora nao concede nada, e
+                        // retira-los faria o preflight falhar para um cliente de
+                        // demonstracao que ainda os envie.
                         "X-Cliente-Id",
                         "X-Cliente-Segmento",
                         "X-Cliente-Relacionamento")

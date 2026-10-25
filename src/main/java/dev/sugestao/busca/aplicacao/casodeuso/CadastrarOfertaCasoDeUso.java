@@ -1,7 +1,9 @@
 package dev.sugestao.busca.aplicacao.casodeuso;
 
+import dev.sugestao.busca.aplicacao.porta.entrada.Autorizacao;
 import dev.sugestao.busca.aplicacao.porta.entrada.CadastrarOferta;
 import dev.sugestao.busca.aplicacao.porta.entrada.ComandoDeCadastroDeOferta;
+import dev.sugestao.busca.aplicacao.porta.entrada.JornadaNaoAutorizada;
 import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDoCadastro;
 import dev.sugestao.busca.aplicacao.porta.saida.RegistroDeOfertas;
 import dev.sugestao.busca.dominio.oferta.Oferta;
@@ -36,10 +38,25 @@ public class CadastrarOfertaCasoDeUso implements CadastrarOferta {
     }
 
     @Override
-    public ResultadoDoCadastro executar(ComandoDeCadastroDeOferta comando) {
+    public ResultadoDoCadastro executar(ComandoDeCadastroDeOferta comando, Autorizacao autorizacao) {
         // Valida antes de tocar o registro. Uma oferta recusada não deve ter
         // custado uma ida ao índice, e sobretudo não deve ter sobrescrito nada.
         Oferta oferta = comando.paraOferta();
+
+        // Autorização DEPOIS da validação, e a ordem foi escolhida.
+        //
+        // Autorizar primeiro pareceria mais seguro e diria menos: o chamador
+        // receberia 403 para um corpo que também estava malformado, corrigiria o
+        // token, reenviaria, e só então descobriria os oito campos errados. E
+        // não há risco em validar primeiro — a validação é pura, não toca o
+        // registro e não revela nada sobre ofertas existentes.
+        //
+        // A jornada comparada é a NORMALIZADA pelo domínio, não a que veio no
+        // corpo. Sem isso, " Credito " passaria pela comparação com um token de
+        // "credito" ou não, dependendo de espaço em branco.
+        if (!autorizacao.podeCadastrarEm(oferta.jornada())) {
+            throw new JornadaNaoAutorizada(oferta.jornada(), autorizacao.jornada());
+        }
 
         boolean existia = registro.porId(oferta.ofertaId()).isPresent();
         registro.gravar(oferta);

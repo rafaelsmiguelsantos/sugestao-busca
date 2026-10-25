@@ -21,20 +21,67 @@
 #   diz quais produtos o cliente nao pode contratar, e isso e informacao sobre a
 #   pessoa, nao sobre a busca.
 #
-# A IDENTIDADE DO CLIENTE
-#   Vem de cabecalho, nao de query string, porque em producao ela vem do token:
-#     X-Cliente-Id             qual cliente
-#     X-Cliente-Segmento       PF | PJ
-#     X-Cliente-Relacionamento VAREJO | UNICLASS | PERSONNALITE | PRIVATE
+# AS ROTAS SAO PROTEGIDAS. GERE OS TOKENS PRIMEIRO
 #
-#   Segmento e relacionamento viajam separados do perfil de proposito: eles sao
-#   conhecidos antes de qualquer leitura e por isso entram como filtro no indice,
-#   o que permite a consulta ao Solr arrancar junto com a leitura do perfil em
-#   vez de atras dela. E o que faz o orcamento de 30 ms fechar.
+#   .\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado
+#   .\scripts\gerar-token.ps1 -Tipo jornada -Jornada credito
+#   .\scripts\gerar-token.ps1 -Tipo operacao
+#
+#   Cole cada um na variavel correspondente abaixo. Eles valem 60 minutos.
+#
+#   O REST Client nao assina JWT, entao aqui o token e colado a mao. Se isso
+#   incomodar, requisicoes\bater.ps1 e a collection do Postman geram os tokens
+#   sozinhos - a collection assina no proprio prerequest, com o CryptoJS que o
+#   Postman embute.
+#
+# TRES CHAMADORES, TRES PERMISSOES
+#   cliente   sugestao:ler, eventos:escrever
+#   jornada   ofertas:escrever, ofertas:ler   (SO da jornada declarada no token)
+#   operacao  ofertas:todas                   (qualquer jornada) + aprendizado
+#
+# A IDENTIDADE DO CLIENTE VEM DO TOKEN
+#   sub             qual cliente
+#   segmento        PF | PJ
+#   relacionamento  VAREJO | UNICLASS | PERSONNALITE | PRIVATE
+#
+#   Segmento e relacionamento viajam no token, separados do perfil, de
+#   proposito: eles sao conhecidos antes de qualquer leitura e por isso entram
+#   como filtro no indice, o que permite a consulta ao Solr arrancar junto com a
+#   leitura do perfil em vez de atras dela. E o que faz o orcamento de 30 ms
+#   fechar - e agora eles vem PROVADOS, nao ditos por cabecalho.
+#
+#   Os X-Cliente-* continuam nas requisicoes abaixo e o servico os IGNORA
+#   enquanto a seguranca estiver ligada. Eles so valem com
+#   sugestao.seguranca.habilitada=false, que grita no log na subida.
 ###############################################################################
 
 @host = http://localhost:8080
 @solr = http://localhost:8983/solr/sugestoes
+
+# Um token POR PERFIL: com a seguranca ligada o X-Cliente-Id e ignorado, e
+# quem decide de quem e a busca e o 'sub' do token. Sem um token por perfil,
+# todos os cenarios abaixo consultariam o mesmo cliente.
+#
+# Gere todos de uma vez:
+#
+#   @('pf-novo','pf-pix-recusado','pf-investidor','pf-sem-elegibilidade',
+#     'pf-negativado','pf-bloqueado','pf-uniclass','pj-lojista') | ForEach-Object {
+#       $seg = if ($_ -like 'pj-*') { 'PJ' } else { 'PF' }
+#       $rel = if ($_ -eq 'pf-uniclass') { 'UNICLASS' } else { 'VAREJO' }
+#       $tk = .\scripts\gerar-token.ps1 -Tipo cliente -ClienteId $_ -Segmento $seg `
+#              -Relacionamento $rel | Where-Object { $_ -match '^eyJ' }
+#       "@token_$($_ -replace '-','_') = $tk" }
+
+@token_pf_bloqueado = COLE_AQUI
+@token_pf_investidor = COLE_AQUI
+@token_pf_negativado = COLE_AQUI
+@token_pf_novo = COLE_AQUI
+@token_pf_pix_recusado = COLE_AQUI
+@token_pf_sem_elegibilidade = COLE_AQUI
+@token_pf_uniclass = COLE_AQUI
+@token_pj_lojista = COLE_AQUI
+@tokenJornada = COLE_AQUI_O_TOKEN_DE_JORNADA
+@tokenOperacao = COLE_AQUI_O_TOKEN_DE_OPERACAO
 
 
 ###############################################################################
@@ -47,6 +94,7 @@
 #   melhorOferta.posicao    -> em que linha ela saiu (liga a impressao)
 #   explicacao.jornadaLider -> qual intencao o prefixo revelou
 GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -55,6 +103,7 @@ X-Cliente-Relacionamento: VAREJO
 # limite=1 devolve exatamente o item da posicao 0 de limite=8. A ordem nao muda
 # com o tamanho: o teto corta o fim da lista, nunca reordena o comeco.
 GET {{host}}/v1/sugestoes?q=emprestim&limite=1&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -64,6 +113,7 @@ X-Cliente-Relacionamento: VAREJO
 # nao ha oferta elegivel". Devolver a primeira linha qualquer para o campo nao
 # vir vazio seria inventar oferta.
 GET {{host}}/v1/sugestoes?q=segunda via&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -78,6 +128,7 @@ X-Cliente-Relacionamento: VAREJO
 
 ### 2.1  Conta operante, sem restricao - ve credito
 GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -87,6 +138,7 @@ X-Cliente-Relacionamento: VAREJO
 # para este cliente; o caminho e a jornada de renegociacao, que entra por
 # gatilho e ocupa a linha de evento.
 GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+Authorization: Bearer {{token_pf_negativado}}
 X-Cliente-Id: pf-negativado
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -94,6 +146,7 @@ X-Cliente-Relacionamento: VAREJO
 ### 2.3  Conta BLOQUEADA - operacao que exige conta operante sai
 # Descarte esperado: CONTA_NAO_OPERANTE.
 GET {{host}}/v1/sugestoes?q=transfer&explicar=true
+Authorization: Bearer {{token_pf_bloqueado}}
 X-Cliente-Id: pf-bloqueado
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -102,6 +155,7 @@ X-Cliente-Relacionamento: VAREJO
 # Descarte esperado: SEM_ELEGIBILIDADE. Falha fechada: sem concessao explicita,
 # a oferta nao aparece.
 GET {{host}}/v1/sugestoes?q=consignad&explicar=true
+Authorization: Bearer {{token_pf_sem_elegibilidade}}
 X-Cliente-Id: pf-sem-elegibilidade
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -110,18 +164,21 @@ X-Cliente-Relacionamento: VAREJO
 # O corte de faixa e filtro no indice, nao pos-filtro: item de faixa alta nao
 # chega a pontuar para quem nao e da faixa.
 GET {{host}}/v1/sugestoes?q=invest&explicar=true
+Authorization: Bearer {{token_pf_uniclass}}
 X-Cliente-Id: pf-uniclass
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: UNICLASS
 
 ### 2.6  Mesmo prefixo, faixa VAREJO - compare com 2.5
 GET {{host}}/v1/sugestoes?q=invest&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
 
 ### 2.7  Pessoa juridica - outro vocabulario
 GET {{host}}/v1/sugestoes?q=maquin&explicar=true
+Authorization: Bearer {{token_pj_lojista}}
 X-Cliente-Id: pj-lojista
 X-Cliente-Segmento: PJ
 X-Cliente-Relacionamento: VAREJO
@@ -129,6 +186,7 @@ X-Cliente-Relacionamento: VAREJO
 ### 2.8  Produto JA CONTRATADO nao e oferecido de novo
 # Descarte esperado: PRODUTO_JA_CONTRATADO.
 GET {{host}}/v1/sugestoes?q=invest&explicar=true
+Authorization: Bearer {{token_pf_investidor}}
 X-Cliente-Id: pf-investidor
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -143,6 +201,7 @@ X-Cliente-Relacionamento: VAREJO
 # por score, porque um gatilho forte empurraria a lista inteira para uma
 # intencao que o cliente talvez nem estivesse perseguindo.
 GET {{host}}/v1/sugestoes?q=ant&explicar=true
+Authorization: Bearer {{token_pf_pix_recusado}}
 X-Cliente-Id: pf-pix-recusado
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -165,6 +224,7 @@ X-Cliente-Relacionamento: VAREJO
 # A oferta nasce com os quatro contadores em zero e aparece na busca no mesmo
 # instante: o piso de k-anonimato vale so para termo vindo do log.
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 {
@@ -190,9 +250,11 @@ Content-Type: application/json
 # bloco 'desempenho' esta zerado. Devolver o estado gravado, e nao um eco do
 # enviado, e o que faz o cadastro ser conferivel.
 GET {{host}}/v1/ofertas/OFR-CREDITO-CONSORCIO
+Authorization: Bearer {{tokenJornada}}
 
 ### 4.3  A oferta recem-cadastrada JA aparece na busca
 GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -202,6 +264,7 @@ X-Cliente-Relacionamento: VAREJO
 # reenviar depois de um timeout sem precisar saber se a primeira chegou.
 # Um 200 onde se esperava 201 avisa que o identificador colidiu.
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 {
@@ -224,6 +287,7 @@ Content-Type: application/json
 # vetaInadimplencia=true no cadastro acima -> descarte CONTA_INADIMPLENTE aqui.
 # A restricao declarada no cadastro e a mesma que a Peneira aplica na leitura.
 GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+Authorization: Bearer {{token_pf_negativado}}
 X-Cliente-Id: pf-negativado
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -232,12 +296,14 @@ X-Cliente-Relacionamento: VAREJO
 # relacionamentos: ["VAREJO","UNICLASS"] -> PERSONNALITE nao ve. E filtro no
 # indice: a oferta nao chega a pontuar.
 GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: PERSONNALITE
 
 ### 4.7  Oferta nao encontrada -> 404 problem+json
 GET {{host}}/v1/ofertas/OFR-NAO-EXISTE
+Authorization: Bearer {{tokenJornada}}
 
 
 ###############################################################################
@@ -252,6 +318,7 @@ GET {{host}}/v1/ofertas/OFR-NAO-EXISTE
 # Recusar no primeiro problema transformaria a integracao numa sequencia de
 # tentativas, uma por campo, cada uma precisando de um deploy do outro lado.
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 {
@@ -271,6 +338,7 @@ Content-Type: application/json
 # faria do cadastro de oferta um redirecionador aberto com o nome do banco na
 # frente. "//" e barrado junto: o navegador o trata como absoluto.
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 {
@@ -289,12 +357,14 @@ Content-Type: application/json
 # 400 diz "nao consegui ler o que voce mandou" e a correcao e no serializador.
 # 422 diz "li perfeitamente e recusei" e a correcao e no valor.
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 { "ofertaId": "OFR-X", "termo": }
 
 ### 5.4  Data fora do ISO-8601 -> 400 com o formato esperado no detail
 POST {{host}}/v1/ofertas
+Authorization: Bearer {{tokenJornada}}
 Content-Type: application/json
 
 {
@@ -314,6 +384,7 @@ Content-Type: application/json
 # justamente para isto: caminho inexistente, metodo errado e Content-Type nao
 # suportado mantem o status certo em vez de virarem 500.
 DELETE {{host}}/v1/ofertas/OFR-CREDITO-CONSORCIO
+Authorization: Bearer {{tokenJornada}}
 
 ### 5.6  Caminho inexistente -> 404, nao 500
 GET {{host}}/v1/nao-existe
@@ -331,18 +402,21 @@ GET {{host}}/v1/nao-existe
 # Com um caractere o leque de candidatos e o indice inteiro, e o prazo de 18 ms
 # nao se sustenta.
 GET {{host}}/v1/sugestoes?q=e
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
 
 ### 6.2  q ausente -> lista vazia, 200
 GET {{host}}/v1/sugestoes
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
 
 ### 6.3  limite ilegivel -> cai no padrao, 200
 GET {{host}}/v1/sugestoes?q=emprestim&limite=tres
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -352,6 +426,7 @@ X-Cliente-Relacionamento: VAREJO
 # exatamente esta o limite, e transformaria um pedido grande demais em falha
 # quando devolver oito e uma resposta perfeitamente util.
 GET {{host}}/v1/sugestoes?q=a&limite=100000
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -361,6 +436,7 @@ X-Cliente-Relacionamento: VAREJO
 # cliente nao pode contratar. Interpretar generosamente seria vazar informacao
 # sobre a pessoa por causa de uma query mal escrita.
 GET {{host}}/v1/sugestoes?q=emprestim&explicar=qualquercoisa
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -376,6 +452,7 @@ GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
 # alta a quem nao tem direito. No CADASTRO a conta e outra, e la o mesmo valor
 # e recusado (bloco 5.1).
 GET {{host}}/v1/sugestoes?q=invest&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: FAIXA_QUE_NAO_EXISTE
@@ -391,6 +468,7 @@ X-Cliente-Relacionamento: FAIXA_QUE_NAO_EXISTE
 # escrever comportamento em nome de qualquer pessoa.
 POST {{host}}/v1/eventos
 Content-Type: application/json
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -410,6 +488,7 @@ X-Cliente-Relacionamento: VAREJO
 # — devolve-lo no corpo do erro recriaria o vazamento que o saneamento evitou.
 POST {{host}}/v1/eventos
 Content-Type: application/json
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO
@@ -426,12 +505,14 @@ X-Cliente-Relacionamento: VAREJO
 # Consome a fila, agrega por janela, aplica o piso de k-anonimato e publica.
 # DESLIGADO em producao: e um gatilho que da para disparar em laco.
 POST {{host}}/v1/aprendizado/rodar
+Authorization: Bearer {{tokenOperacao}}
 
 ### 7.4  Depois do 7.3, o historico do cliente volta para ele
 # Procure origem: "HISTORICO". Esta camada nao passa pelo indice: ela ja esta no
 # perfil, custa zero na requisicao, e por nao sair do dono nao tem como vazar
 # para ninguem.
 GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+Authorization: Bearer {{token_pf_novo}}
 X-Cliente-Id: pf-novo
 X-Cliente-Segmento: PF
 X-Cliente-Relacionamento: VAREJO

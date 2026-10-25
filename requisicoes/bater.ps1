@@ -32,6 +32,38 @@ $ProgressPreference    = 'SilentlyContinue'
 # LerJson, e ajustamos a saida do console para o acento tambem sair inteiro.
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
+# ---------------------------------------------------------------------------
+# Tokens
+#
+# As rotas sao protegidas. Os tokens sao gerados aqui, na hora, pelo mesmo
+# scripts\gerar-token.ps1 que uma pessoa usaria - nao ha token embutido neste
+# arquivo, porque token em arquivo versionado e token que expira e passa a
+# quebrar o teste por motivo que nao e o codigo.
+#
+# Tres chamadores diferentes, porque sao tres permissoes diferentes:
+#   cliente  -> sugestao:ler, eventos:escrever
+#   jornada  -> ofertas:escrever, ofertas:ler  (so da jornada de credito)
+#   operacao -> ofertas:todas                  (qualquer jornada)
+# ---------------------------------------------------------------------------
+function Token {
+    param([string] $Tipo, [string] $ClienteId, [string] $Segmento = 'PF',
+          [string] $Relacionamento = 'VAREJO', [string] $Jornada = 'credito')
+
+    $gerador = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\gerar-token.ps1'
+    $saida = switch ($Tipo) {
+        'cliente'  { & $gerador -Silencioso -Tipo cliente -ClienteId $ClienteId -Segmento $Segmento -Relacionamento $Relacionamento }
+        'jornada'  { & $gerador -Silencioso -Tipo jornada -Jornada $Jornada }
+        'operacao' { & $gerador -Silencioso -Tipo operacao }
+    }
+    return ($saida | Where-Object { $_ -match '^eyJ' } | Select-Object -First 1)
+}
+
+$TokenDeOperacao = $null
+function TokenDeOperacao {
+    if (-not $script:TokenDeOperacao) { $script:TokenDeOperacao = Token -Tipo operacao }
+    return $script:TokenDeOperacao
+}
+
 $CENARIOS = @('oferta', 'conta', 'cadastro', 'validacao', 'privacidade', 'entrada', 'latencia')
 
 if ($Lista) {
@@ -76,6 +108,11 @@ function Buscar {
 
     $cab = @{}
     if (-not $SemCliente) {
+        # A identidade vai no token, assinada - nao em cabecalho, que e dito
+        # pelo cliente e nao provado. Os X-Cliente-* continuam indo para o caso
+        # de a seguranca estar desligada; com ela ligada o servico os ignora.
+        $t = Token -Tipo cliente -ClienteId $ClienteId -Segmento $Segmento -Relacionamento $Relacionamento
+        $cab['Authorization']            = "Bearer $t"
         $cab['X-Cliente-Id']             = $ClienteId
         $cab['X-Cliente-Segmento']       = $Segmento
         $cab['X-Cliente-Relacionamento'] = $Relacionamento
@@ -295,8 +332,13 @@ function Show-Cadastro {
         vigenciaFim        = '2027-10-01T00:00:00Z'
     }
 
+    # A jornada dona. Um token de cliente aqui daria 403: ele nao tem
+    # ofertas:escrever. Um token de outra jornada daria 403 tambem, por outro
+    # motivo - a oferta nao seria dele.
+    $comoJornada = @{ Authorization = "Bearer $(Token -Tipo jornada -Jornada 'credito')" }
+
     Passo 'POST /v1/ofertas  (primeira vez)'
-    $r = Chamar 'POST' "$Host_/v1/ofertas" $oferta
+    $r = Chamar 'POST' "$Host_/v1/ofertas" $oferta $comoJornada
     Write-Host "   status $($r.Status)" -ForegroundColor $(if ($r.Status -eq 201) { 'Green' } else { 'Yellow' })
     if ($r.Cabecalhos -and $r.Cabecalhos['Location']) { Nota "Location: $($r.Cabecalhos['Location'])" }
     if ($r.Corpo) {
@@ -308,11 +350,27 @@ function Show-Cadastro {
 
     Passo 'POST /v1/ofertas  (de novo, mesmo id)'
     Nota 'Idempotente: 200 e nao 201. Permite reenviar depois de timeout.'
-    $r2 = Chamar 'POST' "$Host_/v1/ofertas" $oferta
+    $r2 = Chamar 'POST' "$Host_/v1/ofertas" $oferta $comoJornada
     Write-Host "   status $($r2.Status)" -ForegroundColor $(if ($r2.Status -eq 200) { 'Green' } else { 'Yellow' })
 
+    Passo 'POST /v1/ofertas com token de CLIENTE (escopo errado)'
+    Nota 'ofertas:escrever nao esta no token de cliente.'
+    $rc = Chamar 'POST' "$Host_/v1/ofertas" $oferta `
+            @{ Authorization = "Bearer $(Token -Tipo cliente -ClienteId 'pf-novo')" }
+    Write-Host "   status $($rc.Status) (esperado 403)" -ForegroundColor $(if ($rc.Status -eq 403) { 'Green' } else { 'Red' })
+
+    Passo 'POST /v1/ofertas de credito com token de SEGUROS (jornada alheia)'
+    Nota 'O token TEM ofertas:escrever. Quem recusa e a regra de negocio, no caso de uso.'
+    $ra = Chamar 'POST' "$Host_/v1/ofertas" $oferta `
+            @{ Authorization = "Bearer $(Token -Tipo jornada -Jornada 'seguros')" }
+    Write-Host "   status $($ra.Status) (esperado 403)" -ForegroundColor $(if ($ra.Status -eq 403) { 'Green' } else { 'Red' })
+    if ($ra.Corpo) {
+        Nota "type: $($ra.Corpo.type)"
+        Nota "pediu '$($ra.Corpo.jornadaPedida)', e dono de '$($ra.Corpo.jornadaDoChamador)'"
+    }
+
     Passo 'GET /v1/ofertas/OFR-CREDITO-CONSORCIO'
-    $r3 = Chamar 'GET' "$Host_/v1/ofertas/OFR-CREDITO-CONSORCIO" $null
+    $r3 = Chamar 'GET' "$Host_/v1/ofertas/OFR-CREDITO-CONSORCIO" $null $comoJornada
     Write-Host "   status $($r3.Status)"
     if ($r3.Corpo) { Nota "termo gravado: '$($r3.Corpo.termo)'  (normalizado)" }
 
@@ -329,13 +387,15 @@ function Show-Cadastro {
     MostrarLista (Buscar -Q 'consorc' -Relacionamento 'PERSONNALITE')
 
     Passo 'GET /v1/ofertas/OFR-NAO-EXISTE'
-    $r4 = Chamar 'GET' "$Host_/v1/ofertas/OFR-NAO-EXISTE" $null
+    $r4 = Chamar 'GET' "$Host_/v1/ofertas/OFR-NAO-EXISTE" $null $comoJornada
     Write-Host "   status $($r4.Status)" -ForegroundColor $(if ($r4.Status -eq 404) { 'Green' } else { 'Red' })
     if ($r4.Corpo) { Nota "type: $($r4.Corpo.type)" }
 }
 
 function Show-Validacao {
     Titulo 'Validacao: todas as violacoes de uma vez'
+
+    $comoJornada = @{ Authorization = "Bearer $(Token -Tipo jornada -Jornada 'credito')" }
 
     Passo 'POST com oito campos errados'
     $ruim = [ordered] @{
@@ -349,7 +409,7 @@ function Show-Validacao {
         vigenciaInicio  = '2027-01-01T00:00:00Z'
         vigenciaFim     = '2026-01-01T00:00:00Z'
     }
-    $r = Chamar 'POST' "$Host_/v1/ofertas" $ruim
+    $r = Chamar 'POST' "$Host_/v1/ofertas" $ruim $comoJornada
     Write-Host "   status $($r.Status)" -ForegroundColor $(if ($r.Status -eq 422) { 'Green' } else { 'Red' })
     if ($r.Corpo) {
         Nota "type: $($r.Corpo.type)"
@@ -368,7 +428,7 @@ function Show-Validacao {
         relacionamentos = @('VAREJO')
         vigenciaInicio = '2026-10-01T00:00:00Z'; vigenciaFim = '2027-10-01T00:00:00Z'
     }
-    $rr = Chamar 'POST' "$Host_/v1/ofertas" $redir
+    $rr = Chamar 'POST' "$Host_/v1/ofertas" $redir $comoJornada
     Write-Host "   status $($rr.Status)" -ForegroundColor $(if ($rr.Status -eq 422) { 'Green' } else { 'Red' })
     if ($rr.Corpo) {
         foreach ($v in $rr.Corpo.violacoes) {
@@ -376,15 +436,24 @@ function Show-Validacao {
         }
     }
 
-    Passo 'Status corretos para erro de protocolo (nao 500)'
+    Passo 'Erro de protocolo: a SEGURANCA responde antes do MVC'
+    Nota 'Com anyRequest().denyAll(), metodo nao mapeado e caminho inexistente dao 403'
+    Nota 'e nao 405/404 - a cadeia de autorizacao decide antes de o Spring MVC'
+    Nota 'descobrir que a rota nao existe. Rota nova nasce FECHADA, e de passagem'
+    Nota 'nao se conta a quem sonda quais metodos e caminhos existem.'
     foreach ($caso in @(
-        @{ m = 'DELETE'; u = "$Host_/v1/ofertas/OFR-CREDITO-CONSORCIO"; esperado = 405; rot = 'metodo errado' },
-        @{ m = 'GET';    u = "$Host_/v1/nao-existe";                    esperado = 404; rot = 'caminho inexistente' }
+        @{ m = 'DELETE'; u = "$Host_/v1/ofertas/OFR-CREDITO-CONSORCIO"; esperado = 403; rot = 'metodo nao mapeado' },
+        @{ m = 'GET';    u = "$Host_/v1/nao-existe";                    esperado = 403; rot = 'caminho inexistente' }
     )) {
-        $rp = Chamar $caso.m $caso.u $null
+        $rp = Chamar $caso.m $caso.u $null $comoJornada
         $cor = if ($rp.Status -eq $caso.esperado) { 'Green' } else { 'Red' }
         Write-Host ("   {0,-22} {1} {2} (esperado {3})" -f $caso.rot, $caso.m, $rp.Status, $caso.esperado) -ForegroundColor $cor
     }
+
+    Passo 'Sem credencial nenhuma'
+    $rs = Chamar 'GET' "$Host_/v1/sugestoes?q=emprestim" $null
+    Write-Host ("   status {0} (esperado 401)" -f $rs.Status) -ForegroundColor $(if ($rs.Status -eq 401) { 'Green' } else { 'Red' })
+    if ($rs.Corpo) { Nota "type: $($rs.Corpo.type)" }
 }
 
 function Show-Privacidade {
@@ -427,7 +496,18 @@ function Show-Privacidade {
         @{ tipo = 'BUSCA_DIGITADA'; termo = 'chave 123e4567-e89b-12d3-a456-426614174000' },
         @{ tipo = 'BUSCA_DIGITADA'; termo = 'emprestimo pessoal' }
     )
-    $cab = @{ 'X-Cliente-Id' = 'pf-novo'; 'X-Cliente-Segmento' = 'PF'; 'X-Cliente-Relacionamento' = 'VAREJO' }
+    # eventos:escrever esta no token de cliente. A identidade de quem gerou o
+    # evento vem do 'sub' do token, nao do corpo: aceitar clienteId no corpo
+    # deixaria qualquer chamador escrever comportamento em nome de qualquer
+    # pessoa - e como e esse identificador que a agregacao conta para medir
+    # clientes distintos, quem controlasse o corpo controlaria o piso de
+    # k-anonimato.
+    $cab = @{
+        'Authorization'            = "Bearer $(Token -Tipo cliente -ClienteId 'pf-novo')"
+        'X-Cliente-Id'             = 'pf-novo'
+        'X-Cliente-Segmento'       = 'PF'
+        'X-Cliente-Relacionamento' = 'VAREJO'
+    }
     $re = Chamar 'POST' "$Host_/v1/eventos" $corpo $cab
     Write-Host "   status $($re.Status)"
     if ($re.Corpo) {
@@ -460,7 +540,15 @@ function Show-Entrada {
         @{ rot = 'explicar=qualquercoisa'; url = "$Host_/v1/sugestoes?q=emprestim&explicar=qualquercoisa" },
         @{ rot = 'faixa inexistente';      url = "$Host_/v1/sugestoes?q=invest" }
     )
-    $cab = @{ 'X-Cliente-Id' = 'pf-novo'; 'X-Cliente-Segmento' = 'PF'; 'X-Cliente-Relacionamento' = 'FAIXA_QUE_NAO_EXISTE' }
+    # A faixa inexistente vai no TOKEN, nao no cabecalho: e la que o servico a
+    # le. O cabecalho continua indo e sendo ignorado, de proposito - mostrar que
+    # ele nao decide mais nada e metade do ponto deste cenario.
+    $cab = @{
+        'Authorization'            = "Bearer $(Token -Tipo cliente -ClienteId 'pf-novo' -Relacionamento 'VAREJO')"
+        'X-Cliente-Id'             = 'pf-escolhido-por-mim'
+        'X-Cliente-Segmento'       = 'PJ'
+        'X-Cliente-Relacionamento' = 'PRIVATE'
+    }
 
     $todosOk = $true
     foreach ($c in $casos) {
@@ -471,8 +559,20 @@ function Show-Entrada {
         Write-Host ("   {0,-24} status {1}  itens {2}" -f $c.rot, $rc.Status, $n) -ForegroundColor $cor
     }
 
-    Passo 'Sem cabecalho de cliente nenhum'
-    $rs = Chamar 'GET' "$Host_/v1/sugestoes?q=emprestim&explicar=true" $null
+    Passo 'O cabecalho NAO decide mais nada'
+    Nota 'As chamadas acima mandaram X-Cliente-Id=pf-escolhido-por-mim, Segmento=PJ e'
+    Nota 'Relacionamento=PRIVATE no cabecalho, e um token de pf-novo/PF/VAREJO.'
+    Nota 'Quem vale e o token. Antes da seguranca, o cabecalho escolhia o historico'
+    Nota 'de qualquer pessoa e a faixa de qualquer oferta.'
+    $rt = Chamar 'GET' "$Host_/v1/sugestoes?q=emprestim&explicar=true" $null $cab
+    if ($rt.Corpo -and $rt.Corpo.explicacao) {
+        $perfilVisto = $rt.Corpo.explicacao.perfil
+        Write-Host ("   perfil resolvido: {0} (do token, nao do cabecalho)" -f $perfilVisto) -ForegroundColor Green
+    }
+
+    Passo 'Token de cliente sem sub conhecido: lista popular, degradada'
+    $rs = Chamar 'GET' "$Host_/v1/sugestoes?q=emprestim&explicar=true" $null `
+            @{ Authorization = "Bearer $(Token -Tipo cliente -ClienteId 'cliente-que-nao-existe')" }
     $n = if ($rs.Corpo -and $rs.Corpo.itens) { $rs.Corpo.itens.Count } else { 0 }
     Write-Host ("   status {0}  itens {1}  degradada={2}" -f $rs.Status, $n, $rs.Corpo.degradada) `
         -ForegroundColor $(if ($rs.Status -eq 200) { 'Green' } else { 'Red' })

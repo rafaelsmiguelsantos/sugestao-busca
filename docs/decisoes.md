@@ -398,15 +398,128 @@ devolvendo 200 o tempo inteiro e se recuperando sem reiniciar o app.
 
 ---
 
+## 14. Servidor de recurso, e a regra de jornada na aplicação
+
+**Contexto.** As rotas eram abertas e a identidade vinha de cabeçalho — dito pelo
+cliente, não provado. Quem escolhia o próprio `X-Cliente-Id` escolhia o histórico
+de quem quisesse, e quem escolhia o próprio `X-Cliente-Relacionamento` via oferta
+de faixa que não era a dele. E qualquer chamador cadastrava oferta em nome de
+qualquer jornada.
+
+**Decisão.** Servidor de recurso OAuth 2.0 com JWT. Escopo por rota,
+`anyRequest().denyAll()`, e `401`/`403` em `problem+json` como o resto dos erros.
+
+### Valida e não emite
+
+Não entra o starter de *authorization server*. Emitir token é papel do provedor
+de identidade, e um BFF que emite o próprio token é um BFF que decide quem ele
+mesmo é.
+
+Os tokens de desenvolvimento saem de `scripts/gerar-token.ps1` — um script,
+**fora da aplicação**. Um endpoint `/dev/token`, por bem gateado que fosse, seria
+um caminho de emissão vivendo no mesmo processo que valida, e "bem gateado" é uma
+propriedade que se perde num refactor. Num script não há nada para gatear: o
+arquivo não sobe com a aplicação.
+
+### A regra de jornada mora no caso de uso
+
+`ofertas:escrever` diz que o chamador pode cadastrar **alguma coisa**. A
+reivindicação `jornada` diz **o quê**.
+
+A separação é o ponto. O escopo é permissão e é decidido na cadeia de segurança;
+"a oferta tem de ser da jornada de quem cadastra" é regra de negócio e é decidida
+no `CadastrarOfertaCasoDeUso`, que recebe um `Autorizacao`. Com isso a regra é
+testável sem HTTP e continuaria valendo se o cadastro passasse a entrar por uma
+fila, por um lote ou por um console administrativo.
+
+`Autorizacao` é deliberadamente pobre: tem a jornada e o privilégio irrestrito, e
+nada mais. Toda informação que entrasse ali passaria a ser informação que a
+aplicação sabe extrair de um token, e token é assunto da borda.
+
+**Separada do comando, e não é cerimônia:** o comando é o que o chamador *pediu*,
+a autorização é o que ele *pode*. Juntar os dois permitiria a quem monta o pedido
+declarar a própria permissão.
+
+**Autorização depois da validação.** Autorizar primeiro pareceria mais seguro e
+diria menos: o chamador receberia 403 para um corpo que também estava malformado,
+corrigiria o token, reenviaria, e só então descobriria os oito campos errados. E
+não há risco — a validação é pura, não toca o registro e não revela nada sobre
+ofertas existentes.
+
+**A jornada comparada é a normalizada pelo domínio**, não a que veio no corpo.
+Sem isso, `" Crédito "` passaria ou não dependendo de espaço em branco.
+
+**Jornada não é namespace.** `credito` não autoriza `credito-imobiliario`. Se um
+dia precisar ser hierárquico, a hierarquia tem de ser declarada, nunca inferida
+de casamento de texto.
+
+### Detalhes que custaram algo
+
+**O segredo padrão é vazio e a aplicação recusa subir.** Um segredo embutido
+funcionaria em qualquer lugar, inclusive em produção, e assinaria tokens que
+qualquer leitor deste repositório sabe forjar. Falhar na subida é ruidoso,
+acontece uma vez, e acontece para quem está configurando.
+
+Isso quebrou o teste de contexto — exatamente como quebraria um deploy sem
+segredo. A primeira correção foi um `src/test/resources/application.properties`,
+e **estava errada**: arquivo de mesmo nome **substitui** o do `src/main` inteiro,
+não soma, e o contexto passou a falhar com `NullPointerException` em
+`sugestao.aprendizado`. Arquivo de *perfil* é aditivo. Virou
+`application-teste.properties` com `@ActiveProfiles("teste")`.
+
+**Substituir o ponto de entrada derruba o `WWW-Authenticate`.** Trocar o corpo do
+401 por `problem+json` substitui o `BearerTokenAuthenticationEntryPoint`, que era
+quem emitia aquele cabeçalho — e o RFC 6750 o exige. Quem apontou foi a asserção
+13 da collection, depois de o comentário no código ter afirmado por escrito que o
+cabeçalho continuava saindo. Ele agora é escrito à mão, sem o parâmetro `error=`,
+que é justamente onde se contaria "expirado" ou "assinatura inválida".
+
+**O escopo é comparado exato, nunca por `contains()`.** A reivindicação `scope` é
+uma lista separada por espaço; um `contains("ofertas:todas")` casaria o privilégio
+mais alto desta API dentro de qualquer escopo que o tenha como pedaço —
+`relatorio:ofertas:todas-as-regioes` concederia tudo.
+
+**Não há CSRF**, e não é esquecimento: não há sessão nem cookie. A credencial vai
+no `Authorization`, que o navegador não anexa sozinho, e é a anexação automática
+que o CSRF existe para conter.
+
+**CORS antes da autenticação.** O preflight não leva `Authorization`, por
+especificação — se ele passasse pela cadeia de autenticação, tomaria 401 e nenhum
+cliente de navegador passaria do primeiro `OPTIONS`.
+
+**`/actuator/metrics` não é público**, só `health`. Latência por rota conta o
+desenho do serviço a quem perguntar; `health` é o que o balanceador consulta, e
+ele não tem token.
+
+**Trocar HMAC por RSA com JWKS remoto é trocar um método.** Nem o resolvedor de
+cliente, nem as regras de rota, nem o caso de uso mudam.
+
+**Verificado:** 14 de 14 combinações de rota e token, incluindo
+`POST /v1/ofertas` numa jornada alheia dando 403 com o token que *tem* o escopo
+de escrita, e `GET /v1/nao-existe` com token válido dando 403 em vez de 404 —
+`denyAll` fazendo rota nova nascer fechada.
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas
 são resolvidas. Nenhum destes é descuido — estão aqui para não virarem surpresa.
 
-**Não há autorização em `POST /v1/ofertas`.** Qualquer chamador pode cadastrar
-oferta em nome de qualquer jornada. Num sistema de verdade o token carrega a
-jornada e o serviço recusa cadastro fora dela — o campo `jornada` do corpo seria
-*conferido* contra o token, não aceito.
+**~~Não há autorização em `POST /v1/ofertas`.~~** Resolvido na decisão 14: o
+token carrega a jornada e o caso de uso confere o corpo contra ela.
+
+**A revogação de token não existe.** Um JWT assinado vale até expirar, e os
+tokens deste POC valem 60 minutos. Não há lista de revogados nem introspecção, o
+que significa que um token vazado vale uma hora. Com provedor de verdade isso é
+tempo de expiração curto mais *refresh*, ou introspecção para os escopos de
+escrita — `ofertas:todas` é o candidato óbvio, porque é o privilégio que mais
+machuca se vazar.
+
+**A rotação do segredo derruba todos os tokens de uma vez.** Com HMAC e um
+segredo só, trocar o segredo invalida tudo o que está em voo. Com RSA e JWKS a
+rotação é por `kid` e convive com dois pares de chaves durante a transição — é
+outro motivo, além da assimetria, para o decodificador ser a peça que se troca.
 
 **Não há transação no cadastro.** A leitura de existência e a gravação são duas
 chamadas ao índice, e dois cadastros simultâneos do mesmo identificador podem

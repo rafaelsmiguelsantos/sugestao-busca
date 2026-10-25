@@ -1,6 +1,7 @@
 package dev.sugestao.busca.adaptador.entrada.web;
 
 import dev.sugestao.busca.adaptador.saida.solr.FalhaNoIndice;
+import dev.sugestao.busca.aplicacao.porta.entrada.JornadaNaoAutorizada;
 import dev.sugestao.busca.dominio.oferta.OfertaInvalida;
 import dev.sugestao.busca.dominio.oferta.Violacao;
 import org.slf4j.Logger;
@@ -81,6 +82,32 @@ public class TratadorDeErros extends ResponseEntityExceptionHandler {
                 .toList());
 
         registro.info("cadastro de oferta recusado: {}", e.violacoes());
+        return problema;
+    }
+
+    /**
+     * 403, e não 422.
+     *
+     * <p>A distinção é a que mais ajuda quem integra: 422 diz "o que você mandou
+     * está errado" e a correção é no corpo; 403 diz "o que você mandou está
+     * certo e não é seu", e a correção é no token — ou em não mandar. Devolver
+     * as duas como 422 obrigaria a ler a mensagem para saber se o problema é do
+     * pedido ou da permissão.
+     *
+     * <p>A resposta diz qual jornada foi pedida e qual é a do chamador. As duas
+     * são informação que ele já tem: uma ele enviou, a outra está no token dele.
+     */
+    @ExceptionHandler(JornadaNaoAutorizada.class)
+    public ProblemDetail jornadaNaoAutorizada(JornadaNaoAutorizada e) {
+        var problema = ProblemDetail.forStatus(HttpStatus.FORBIDDEN);
+        problema.setType(URI.create(BASE + "jornada-nao-autorizada"));
+        problema.setTitle("Jornada nao autorizada");
+        problema.setDetail("o token autoriza cadastro apenas na jornada do proprio chamador");
+        problema.setProperty("jornadaPedida", e.jornadaPedida());
+        problema.setProperty("jornadaDoChamador", e.jornadaDoChamador());
+
+        registro.warn("cadastro negado: pediu '{}', e dono de '{}'",
+                e.jornadaPedida(), e.jornadaDoChamador());
         return problema;
     }
 

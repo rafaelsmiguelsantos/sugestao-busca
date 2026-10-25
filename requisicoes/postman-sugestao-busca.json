@@ -4,8 +4,143 @@
     "description": "Collection do Postman / newman para a camada de sugestao de busca.\n\nRODAR NO TERMINAL (sem instalar nada permanente):\n\n    npx newman run .\\requisicoes\\postman-sugestao-busca.json\n\nRODAR NA INTERFACE: File > Import e aponte para este arquivo.\n\nPRECISA do app no ar com o perfil 'local':\n    $env:JAVA_HOME='C:\\Users\\migue\\tools\\jdk-25'\n    .\\mvnw spring-boot:run \"-Dspring-boot.run.profiles=local\"\n\nO perfil 'local' liga ?explicar=true e afrouxa os prazos de 18/8/30 ms para\n250/100/400. Os testes NAO dependem da explicacao: eles conferem o contrato\npublico. O ?explicar=true entra em uma requisicao so, para a saida mostrar os\ndescartes.\n\nSOBRE O CADASTRO SER IDEMPOTENTE: a primeira requisicao aceita 201 ou 200,\nporque rodar a collection duas vezes na mesma colecao do Solr e legitimo e a\nsegunda vez substitui em vez de criar. Quem PROVA a idempotencia e a requisicao\n'reenvio', que exige 200 estrito depois de o cadastro ja existir.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Assina os tokens desta rodada, aqui mesmo.",
+          "//",
+          "// POR QUE NAO HA TOKEN ESCRITO NO ARQUIVO: token em arquivo versionado",
+          "// e token que expira, e a partir do dia seguinte a collection falha por",
+          "// um motivo que nao e o codigo. Assinando na hora, ela funciona hoje e",
+          "// em marco.",
+          "//",
+          "// O segredo e o de application-local.properties - ele assina apenas",
+          "// tokens que valem contra aquele arquivo, e qualquer pessoa que leia o",
+          "// repositorio sabe forja-lo. E por isso que ele NAO e o padrao de",
+          "// producao, onde o segredo e vazio e a aplicacao recusa subir.",
+          "",
+          "const SEGREDO = pm.collectionVariables.get('segredo');",
+          "const EMISSOR = pm.collectionVariables.get('emissor');",
+          "",
+          "function base64url(palavras) {",
+          "    return CryptoJS.enc.Base64.stringify(palavras)",
+          "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "}",
+          "",
+          "function assinar(corpo) {",
+          "    // JSON.stringify sem espaco: o que se assina e o que se envia, byte",
+          "    // a byte. Espaco em branco entra na assinatura.",
+          "    const cabecalho = base64url(CryptoJS.enc.Utf8.parse(",
+          "        JSON.stringify({ alg: 'HS256', typ: 'JWT' })));",
+          "    const conteudo = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(corpo)));",
+          "    const aAssinar = cabecalho + '.' + conteudo;",
+          "    return aAssinar + '.' + base64url(CryptoJS.HmacSHA256(aAssinar, SEGREDO));",
+          "}",
+          "",
+          "const agora = Math.floor(Date.now() / 1000);",
+          "const comum = { iss: EMISSOR, iat: agora, exp: agora + 600 };",
+          "",
+          "// O app, em nome de uma pessoa. Segmento e faixa vao NO TOKEN, assinados:",
+          "// sao atributos de coorte conhecidos antes de qualquer leitura de perfil, e",
+          "// e isso que permite a consulta ao Solr arrancar junto da leitura do perfil.",
+          "pm.collectionVariables.set('tokenCliente', assinar(Object.assign({}, comum, {",
+          "    sub: pm.collectionVariables.get('clienteElegivel'),",
+          "    segmento: 'PF',",
+          "    relacionamento: 'VAREJO',",
+          "    scope: 'sugestao:ler eventos:escrever'",
+          "})));",
+          "",
+          "pm.collectionVariables.set('tokenClienteInadimplente', assinar(Object.assign({}, comum, {",
+          "    sub: pm.collectionVariables.get('clienteInadimplente'),",
+          "    segmento: 'PF',",
+          "    relacionamento: 'VAREJO',",
+          "    scope: 'sugestao:ler eventos:escrever'",
+          "})));",
+          "",
+          "// A jornada dona das ofertas desta collection. A reivindicacao 'jornada' e",
+          "// o que diz de qual jornada ela e dona, e o caso de uso confere o corpo do",
+          "// cadastro contra ela.",
+          "pm.collectionVariables.set('tokenJornada', assinar(Object.assign({}, comum, {",
+          "    sub: 'jornada-investimento',",
+          "    jornada: 'investimento',",
+          "    scope: 'ofertas:escrever ofertas:ler'",
+          "})));",
+          "",
+          "// Uma jornada DIFERENTE, para provar que ela nao publica no lugar da outra.",
+          "pm.collectionVariables.set('tokenOutraJornada', assinar(Object.assign({}, comum, {",
+          "    sub: 'jornada-seguros',",
+          "    jornada: 'seguros',",
+          "    scope: 'ofertas:escrever ofertas:ler'",
+          "})));",
+          "",
+          "// Privilegio alto, com nome proprio: numa auditoria, procurar quem recebe",
+          "// 'ofertas:todas' e uma busca de uma linha.",
+          "pm.collectionVariables.set('tokenOperacao', assinar(Object.assign({}, comum, {",
+          "    sub: 'operacao-catalogo',",
+          "    scope: 'ofertas:escrever ofertas:ler ofertas:todas aprendizado:executar'",
+          "})));",
+          "",
+          "// ---------------------------------------------------------------",
+          "// Anexa o token certo a esta requisicao.",
+          "//",
+          "// Feito aqui, por nome, em vez de um cabecalho escrito em cada uma das",
+          "// doze: o que se quer declarar nao e 'esta requisicao leva um Bearer', e",
+          "// 'esta requisicao e feita POR QUEM'. Com a tabela num lugar so, dá para",
+          "// ler a collection inteira e ver quem chama o que — que e exatamente a",
+          "// pergunta que uma revisao de autorizacao faz.",
+          "//",
+          "// As requisicoes que NAO levam token tambem estao declaradas, porque a",
+          "// ausencia e parte do teste: preflight sem credencial tem de passar (o",
+          "// navegador nao manda Authorization no OPTIONS, por especificacao), e",
+          "// rota protegida sem credencial tem de dar 401.",
+          "const nome = pm.info.requestName;",
+          "",
+          "const SEM_TOKEN = ['11.', '12.', '13.', '16.'];",
+          "const POR_OPERACAO = ['7.', '15.'];",
+          "const POR_JORNADA_ALHEIA = ['14.'];",
+          "const POR_CLIENTE_INADIMPLENTE = ['5.'];",
+          "const POR_CLIENTE = ['3.', '4.', '10.'];",
+          "",
+          "function comecaCom(prefixos) {",
+          "    return prefixos.some(p => nome.indexOf(p) === 0);",
+          "}",
+          "",
+          "let token = null;",
+          "if (comecaCom(SEM_TOKEN)) {",
+          "    token = null;",
+          "} else if (comecaCom(POR_OPERACAO)) {",
+          "    token = pm.collectionVariables.get('tokenOperacao');",
+          "} else if (comecaCom(POR_JORNADA_ALHEIA)) {",
+          "    token = pm.collectionVariables.get('tokenOutraJornada');",
+          "} else if (comecaCom(POR_CLIENTE_INADIMPLENTE)) {",
+          "    token = pm.collectionVariables.get('tokenClienteInadimplente');",
+          "} else if (comecaCom(POR_CLIENTE)) {",
+          "    token = pm.collectionVariables.get('tokenCliente');",
+          "} else {",
+          "    // O resto e a jornada dona das ofertas desta collection.",
+          "    token = pm.collectionVariables.get('tokenJornada');",
+          "}",
+          "",
+          "if (token) {",
+          "    pm.request.headers.upsert({ key: 'Authorization', value: 'Bearer ' + token });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "_comentarioSobreAutorizacao": [
+    "A tabela de quem chama o que esta no prerequest da collection, escolhida",
+    "pelo NUMERO no nome da requisicao. Mexer na numeracao mexe na autorizacao -",
+    "o que e fragil, e e o preco de nao repetir cabecalho em doze lugares. O",
+    "aviso fica aqui para quem renomear."
+  ],
   "variable": [
     { "key": "host", "value": "http://localhost:8080" },
+    { "key": "segredo", "value": "SEGREDO-REMOVIDO-VER-SUGESTAO-SEGREDO" },
+    { "key": "emissor", "value": "https://sugestao-busca.dev" },
     { "key": "ofertaId", "value": "OFR-PREVIDENCIA-VGBL-NEWMAN" },
     { "key": "termo", "value": "previdência privada VGBL" },
     { "key": "prefixo", "value": "previden" },
@@ -595,6 +730,157 @@
           "host": ["{{host}}"],
           "path": ["v1", "sugestoes"],
           "query": [{ "key": "q", "value": "{{prefixo}}" }]
+        }
+      }
+    },
+    {
+      "name": "13. sem credencial: 401 em problem+json",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 401', () => pm.response.to.have.status(401));",
+              "",
+              "pm.test('WWW-Authenticate diz qual esquema usar', function () {",
+              "    pm.expect(pm.response.headers.get('WWW-Authenticate')).to.include('Bearer');",
+              "});",
+              "",
+              "// O padrao do Spring Security e 401 de corpo vazio. Funciona, e obriga",
+              "// quem integra a adivinhar entre 'nao mandei token', 'mandei expirado' e",
+              "// 'mandei assinado com a chave errada'.",
+              "pm.test('problem+json com type proprio, nao corpo vazio', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('problem+json');",
+              "    pm.expect(pm.response.json().type)",
+              "      .to.eql('https://sugestao-busca.dev/problemas/sem-credencial');",
+              "});",
+              "",
+              "// O motivo exato fica no log do servico. 'Assinatura invalida' e",
+              "// 'expirado as 10:15' ajudam quem integra e ajudam igualmente quem esta",
+              "// sondando.",
+              "pm.test('nao conta POR QUE falhou', function () {",
+              "    const detalhe = pm.response.json().detail.toLowerCase();",
+              "    ['expirad', 'assinatura', 'signature', 'malformed'].forEach(pista => {",
+              "        pm.expect(detalhe, 'vazou: ' + pista).to.not.include(pista);",
+              "    });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [{ "key": "q", "value": "{{prefixo}}" }]
+        }
+      }
+    },
+    {
+      "name": "14. JORNADA ALHEIA: seguros nao publica oferta de investimento",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A requisicao mais importante desta collection.",
+              "//",
+              "// O token e de 'seguros' e TEM o escopo ofertas:escrever - entao a",
+              "// cadeia de autorizacao do Spring deixa passar. Quem recusa e a regra",
+              "// de negocio, no caso de uso: a oferta tem de ser da jornada de quem",
+              "// cadastra.",
+              "//",
+              "// Sem essa regra, qualquer servico com permissao de cadastrar oferta",
+              "// publicaria oferta de QUALQUER jornada, com rotulo e destino escolhidos",
+              "// por ele, e ela apareceria na busca como se fosse do time dono.",
+              "pm.test('status 403', () => pm.response.to.have.status(403));",
+              "",
+              "const p = pm.response.json();",
+              "pm.test('type distingue de falta de escopo', function () {",
+              "    pm.expect(p.type).to.eql('https://sugestao-busca.dev/problemas/jornada-nao-autorizada');",
+              "});",
+              "",
+              "pm.test('diz qual jornada foi pedida e qual e a do chamador', function () {",
+              "    pm.expect(p.jornadaPedida).to.eql('investimento');",
+              "    pm.expect(p.jornadaDoChamador).to.eql('seguros');",
+              "});",
+              "",
+              "// 403 e nao 422: 422 diz 'o que voce mandou esta errado' e a correcao e",
+              "// no corpo; 403 diz 'esta certo e nao e seu', e a correcao e no token.",
+              "pm.test('o corpo estava valido - a recusa foi de permissao', function () {",
+              "    pm.expect(p.violacoes).to.be.undefined;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"OFR-INVADIDA-POR-SEGUROS\",\n  \"termo\": \"fundo multimercado invadido\",\n  \"destino\": \"/app/investimento/fundo-invadido\",\n  \"jornada\": \"investimento\",\n  \"produtoAlvo\": \"INVADIDA\",\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-12-31T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "15. operacao cadastra em qualquer jornada (ofertas:todas)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A mesma oferta que o token de seguros nao conseguiu publicar. Existe",
+              "// para operacao e carga inicial de catalogo: alguem precisa poder semear.",
+              "pm.test('status 2xx', function () {",
+              "    pm.expect([200, 201]).to.include(pm.response.code);",
+              "});",
+              "",
+              "pm.test('gravou na jornada pedida', function () {",
+              "    pm.expect(pm.response.json().jornada).to.eql('investimento');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"OFR-INVADIDA-POR-SEGUROS\",\n  \"termo\": \"fundo multimercado invadido\",\n  \"destino\": \"/app/investimento/fundo-invadido\",\n  \"jornada\": \"investimento\",\n  \"produtoAlvo\": \"INVADIDA\",\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-12-31T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "16. saude e publica: o balanceador nao tem token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200 sem credencial', () => pm.response.to.have.status(200));",
+              "pm.test('esta no ar', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{host}}/actuator/health",
+          "host": ["{{host}}"],
+          "path": ["actuator", "health"]
         }
       }
     }

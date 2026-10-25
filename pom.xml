@@ -57,9 +57,30 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<!--
+			Servidor de recurso OAuth 2.0: valida o token que chega e nao emite
+			nenhum. Emitir e papel do provedor de identidade do banco, e e por
+			isso que nao entra aqui o starter de authorization-server - um BFF
+			que emite o proprio token e um BFF que decide quem ele mesmo e.
+
+			No POC a assinatura e HMAC com segredo compartilhado, porque nao ha
+			provedor. Trocar para RSA com JWKS remoto e trocar o decodificador
+			em ConfiguracaoDeSeguranca: uma linha, e o resto do codigo nao sabe
+			a diferenca.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

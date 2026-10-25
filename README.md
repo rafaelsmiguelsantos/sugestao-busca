@@ -13,14 +13,16 @@ com o motivo de cada ausência registrado.
 
 ## A API
 
-| rota | o que faz |
-|---|---|
-| `GET /v1/sugestoes` | a lista, e `melhorOferta` com o ID acionável no topo |
-| `POST /v1/ofertas` | a jornada dona cadastra a própria oferta, idempotente |
-| `GET /v1/ofertas/{id}` | o estado gravado, para conferência |
-| `POST /v1/eventos` | impressão, clique e adesão — com posição |
-| `POST /v1/aprendizado/rodar` | roda a agregação agora (só no perfil `local`) |
-| `GET /actuator/health` | saúde |
+| rota | o que faz | escopo exigido |
+|---|---|---|
+| `GET /v1/sugestoes` | a lista, e `melhorOferta` com o ID acionável no topo | `sugestao:ler` |
+| `POST /v1/ofertas` | a jornada dona cadastra a própria oferta, idempotente | `ofertas:escrever` |
+| `GET /v1/ofertas/{id}` | o estado gravado, para conferência | `ofertas:ler` |
+| `POST /v1/eventos` | impressão, clique e adesão — com posição | `eventos:escrever` |
+| `POST /v1/aprendizado/rodar` | roda a agregação agora (só no perfil `local`) | `aprendizado:executar` |
+| `GET /actuator/health` | saúde | — pública |
+
+Tudo o mais é negado por padrão. Ver *Autenticação e autorização* abaixo.
 
 ```jsonc
 // GET /v1/sugestoes?q=consignad   (cliente elegível)
@@ -409,6 +411,100 @@ produção" ao lado de um default ligado protege quem lê o arquivo, não quem f
 deploy sem ler. O perfil `local` também afrouxa os prazos para 250/100/400 ms, de
 modo que a demonstração não dependa de o Solr estar aquecido.
 
+## Autenticação e autorização
+
+O serviço é **servidor de recurso** OAuth 2.0: valida o token que chega e **não
+emite nenhum**. Emitir é papel do provedor de identidade, e um BFF que emite o
+próprio token é um BFF que decide quem ele mesmo é.
+
+No POC não há provedor, então a assinatura é HMAC-SHA256 com segredo
+compartilhado e os tokens de desenvolvimento saem de um **script fora da
+aplicação** — para não existir caminho de emissão no serviço nem por acidente:
+
+```powershell
+.\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado
+.\scripts\gerar-token.ps1 -Tipo jornada -Jornada credito
+.\scripts\gerar-token.ps1 -Tipo operacao
+```
+
+### Dois tipos de chamador
+
+| | quem é | reivindicações | escopos |
+|---|---|---|---|
+| **cliente** | o app, em nome de uma pessoa | `sub`, `segmento`, `relacionamento` | `sugestao:ler`, `eventos:escrever` |
+| **jornada** | um serviço de produto | `jornada` | `ofertas:escrever`, `ofertas:ler` |
+| **operação** | carga de catálogo e ops | — | `ofertas:todas`, `aprendizado:executar` |
+
+**Segmento e faixa saírem do token não é detalhe de autenticação, é decisão de
+arquitetura.** Eles são atributos de coorte, conhecidos antes de qualquer leitura
+de perfil, e é isso que permite à consulta ao Solr arrancar junto da leitura do
+perfil em vez de atrás dela — o que faz o orçamento de 30 ms fechar. Agora eles
+vêm **provados** em vez de ditos por cabeçalho, o que é a diferença entre uma
+coorte e uma coorte escolhida por quem chama.
+
+### O escopo diz que você pode cadastrar; a jornada diz o quê
+
+É a regra que fecha o buraco que este README declarou por várias versões.
+`ofertas:escrever` autoriza cadastrar **alguma coisa**; a reivindicação `jornada`
+diz **o quê**. Sem a segunda, a jornada de seguros publicaria uma oferta de
+crédito, com rótulo e destino escolhidos por ela, e ela apareceria na busca como
+se fosse do time de crédito.
+
+**Essa regra não está na configuração de segurança.** Ela está no caso de uso,
+que recebe um `Autorizacao` — porque "a oferta tem de ser da jornada de quem
+cadastra" é regra de negócio, e continuaria valendo se o cadastro passasse a
+entrar por uma fila, por um lote ou por um console. A borda só traduz token em
+`Autorizacao`.
+
+### A matriz, medida
+
+```
+rota                                       token             status
+GET  /v1/sugestoes                         (nenhum)             401
+GET  /v1/sugestoes                         cliente              200
+GET  /v1/sugestoes                         jornada              403   escopo errado
+POST /v1/ofertas (credito)                 cliente              403   escopo errado
+POST /v1/ofertas (credito)                 jornada credito      201
+POST /v1/ofertas (SEGUROS)                 jornada credito      403   <- a regra
+POST /v1/ofertas (SEGUROS)                 operacao             201   ofertas:todas
+GET  /v1/ofertas/{id}                      jornada              200
+GET  /v1/ofertas/{id}                      cliente              403
+POST /v1/aprendizado/rodar                 cliente              403
+POST /v1/aprendizado/rodar                 operacao             200
+GET  /actuator/health                      (nenhum)             200   pública
+GET  /actuator/metrics                     (nenhum)             401   não é pública
+GET  /v1/nao-existe                        cliente              403   nega por padrão
+```
+
+A última linha é a que vale mais a longo prazo: `anyRequest().denyAll()` faz uma
+rota nova **nascer fechada**. O contrário só se descobre em revisão de segurança.
+
+`/actuator/metrics` fica fora do público de propósito: latência por rota conta o
+desenho do serviço a quem perguntar.
+
+### O que fica de fora, e por quê
+
+**O segredo padrão é vazio e a aplicação recusa subir sem ele.** É a escolha
+deliberadamente inconveniente: um segredo embutido funcionaria em qualquer lugar,
+inclusive em produção, e assinaria tokens que qualquer pessoa com acesso a este
+repositório sabe forjar. Falhar na subida é ruidoso, acontece uma vez, e acontece
+para quem está configurando — não para quem está sendo atacado. O perfil `local`
+traz um segredo visivelmente falso.
+
+**`sugestao.seguranca.habilitada=false`** abre todas as rotas e faz a identidade
+voltar a vir de cabeçalho. Existe para demonstrar sem emitir token, **grita no
+log na subida**, e é o único parâmetro deste projeto cuja troca muda o serviço de
+protegido para aberto.
+
+**Não há CSRF**, e não é esquecimento: não há sessão nem cookie. A credencial é um
+token no cabeçalho `Authorization`, que o navegador não anexa sozinho — e é a
+anexação automática que o CSRF existe para conter.
+
+**Trocar HMAC por RSA com JWKS remoto é trocar o decodificador**, um método em
+`ConfiguracaoDeSeguranca`. Nem o resolvedor de cliente, nem as regras de rota,
+nem o caso de uso mudam. É a mesma propriedade que o disjuntor demonstra do
+outro lado: a tecnologia fica num canto.
+
 ## Resiliência
 
 São **três mecanismos**, e a confusão entre eles é o erro mais comum nesta parte
@@ -569,7 +665,11 @@ src/main/java/dev/sugestao/busca/
 │   └── saida/perfil/          PerfisEmMemoria — o lugar do DynamoDB
 │
 └── configuracao/              o único lugar que sabe quem implementa cada porta,
-                               e o único que sabe que existe disjuntor
+    │                          e o único que sabe que existe disjuntor
+    ├── ConfiguracaoDeSeguranca    escopo por rota, decodificador de token,
+    │                              401/403 em problem+json
+    ├── ConfiguracaoDeCors         o que um cliente de navegador precisa
+    └── SugestaoProperties         todo numero discutivel, num lugar
 
 docs/decisoes.md               as decisões, com o que foi recusado e por quê
 docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respostas
@@ -584,6 +684,7 @@ scripts/habilitar-docker.ps1   obsoleto: o Docker já existe nesta máquina
 scripts/criar-colecao.ps1      cria a coleção e aplica o schema
 scripts/semear-vocabulario.ps1 vocabulário sintético
 scripts/conferir-piso.ps1      portão de publicação: k-anonimato e zero-resultado
+scripts/gerar-token.ps1        JWT de desenvolvimento, FORA da aplicação
 solr/schema-sugestoes.json     payload da Schema API
 solr/README.md                 por que cada campo existe
 ```
@@ -626,6 +727,13 @@ O registro completo, com o que foi recusado e por quê, está em
 - **Disjuntor por fora do adaptador, nunca por dentro.** Por dentro ele contaria
   falhas que o adaptador já pagou em rede; por fora ele recusa antes de abrir
   conexão, que é a razão de existir.
+- **O serviço valida token e não emite nenhum.** Os tokens de desenvolvimento
+  saem de um script fora da aplicação, para não existir caminho de emissão no
+  processo que valida. Decisão 14.
+- **A regra de jornada mora no caso de uso, não na cadeia de segurança.** O
+  escopo é permissão; "a oferta tem de ser da jornada de quem cadastra" é regra
+  de negócio.
+- **`anyRequest().denyAll()`.** Rota nova nasce fechada.
 - **Não existe starter do Spring para Solr** desde o Boot 2.4. O SolrJ 10 entra como
   dependência comum e o client vira um `@Bean` nosso.
 - **Duas análises de prefixo**, uma para a frase e outra por palavra, com pesos
@@ -695,9 +803,9 @@ O registro completo, com o que foi recusado e por quê, está em
 6. ~~Consumo por cliente de navegador~~ — feito: CORS configurável, desligado
    por padrão, e [`docs/cliente-web.md`](docs/cliente-web.md) com React e
    Angular.
-7. **Autorização no cadastro de oferta.** É o buraco mais relevante que sobrou:
-   hoje qualquer chamador cadastra em nome de qualquer jornada. O token deveria
-   carregar a jornada e o serviço *conferir* o campo do corpo contra ele.
+7. ~~Autenticação e autorização~~ — feito. Servidor de recurso OAuth 2.0, escopo
+   por rota, `denyAll` por padrão, e a jornada do token conferida contra o corpo
+   do cadastro. Ver *Autenticação e autorização*.
 8. **Teste de carga com concorrência de verdade.** O que existe hoje é medição
    sequencial (p50 12 ms, p99 26 ms, uma thread, perfil `local` com prazos
    afrouxados). Isso compara mudanças entre si; não afirma que o orçamento de
