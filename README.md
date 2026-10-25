@@ -125,6 +125,16 @@ extensão REST Client (`humao.rest-client`). Cada bloco separado por `###` ganha
 link *Send Request*; `Ctrl+Alt+R` envia o bloco do cursor. Os blocos estão
 agrupados por pergunta, e cada um explica o que olhar na resposta.
 
+**Postman / newman** — [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json),
+com **44 asserções** sobre o contrato público. Roda sem instalar nada permanente:
+
+```powershell
+npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json
+```
+
+Ou `File > Import` na interface do Postman. As asserções não dependem do
+`?explicar=true`: elas conferem o que qualquer cliente recebe.
+
 **No terminal** — [`requisicoes/bater.ps1`](requisicoes/bater.ps1), sem precisar de
 extensão nenhuma. Ele resume a resposta no que importa para cada pergunta:
 

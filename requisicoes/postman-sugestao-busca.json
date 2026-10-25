@@ -1,0 +1,602 @@
+{
+  "info": {
+    "name": "sugestao-busca - cadastro e busca de ofertas",
+    "description": "Collection do Postman / newman para a camada de sugestao de busca.\n\nRODAR NO TERMINAL (sem instalar nada permanente):\n\n    npx newman run .\\requisicoes\\postman-sugestao-busca.json\n\nRODAR NA INTERFACE: File > Import e aponte para este arquivo.\n\nPRECISA do app no ar com o perfil 'local':\n    $env:JAVA_HOME='C:\\Users\\migue\\tools\\jdk-25'\n    .\\mvnw spring-boot:run \"-Dspring-boot.run.profiles=local\"\n\nO perfil 'local' liga ?explicar=true e afrouxa os prazos de 18/8/30 ms para\n250/100/400. Os testes NAO dependem da explicacao: eles conferem o contrato\npublico. O ?explicar=true entra em uma requisicao so, para a saida mostrar os\ndescartes.\n\nSOBRE O CADASTRO SER IDEMPOTENTE: a primeira requisicao aceita 201 ou 200,\nporque rodar a collection duas vezes na mesma colecao do Solr e legitimo e a\nsegunda vez substitui em vez de criar. Quem PROVA a idempotencia e a requisicao\n'reenvio', que exige 200 estrito depois de o cadastro ja existir.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "host", "value": "http://localhost:8080" },
+    { "key": "ofertaId", "value": "OFR-PREVIDENCIA-VGBL-NEWMAN" },
+    { "key": "termo", "value": "previdência privada VGBL" },
+    { "key": "prefixo", "value": "previden" },
+    { "key": "produto", "value": "PREVIDENCIA_VGBL" },
+    { "key": "clienteElegivel", "value": "pf-novo" },
+    { "key": "clienteInadimplente", "value": "pf-negativado" }
+  ],
+  "item": [
+    {
+      "name": "1. cadastra a oferta (a jornada dona registra o proprio produto)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// 201 na primeira vez, 200 se a collection ja rodou nesta colecao.",
+              "pm.test('status 2xx (201 criada, ou 200 substituida)', function () {",
+              "    pm.expect([200, 201]).to.include(pm.response.code);",
+              "});",
+              "",
+              "pm.test('devolve Location para conferencia', function () {",
+              "    pm.expect(pm.response.headers.get('Location'))",
+              "      .to.eql('/v1/ofertas/' + pm.collectionVariables.get('ofertaId'));",
+              "});",
+              "",
+              "const corpo = pm.response.json();",
+              "",
+              "// A resposta devolve o ESTADO GRAVADO, nao um eco do enviado. E o que",
+              "// permite a quem integra descobrir na hora que 'previdência privada VGBL'",
+              "// virou 'previdencia privada vgbl' - em vez de descobrir mais tarde que a",
+              "// busca por 'Previdência' nao encontra a oferta.",
+              "pm.test('termo volta NORMALIZADO pela mesma funcao do prefixo digitado', function () {",
+              "    pm.expect(corpo.termo).to.eql('previdencia privada vgbl');",
+              "});",
+              "",
+              "pm.test('identificador volta em maiuscula', function () {",
+              "    pm.expect(corpo.ofertaId).to.eql(pm.collectionVariables.get('ofertaId'));",
+              "});",
+              "",
+              "// Os quatro numeros que o cadastro NAO aceita. Eles sao medidos pelo",
+              "// caminho de aprendizado a partir de impressao, clique e adesao reais.",
+              "// Se o cadastro os aceitasse, a jornada com a oferta mais fraca e o",
+              "// integrador mais otimista ficaria em primeiro lugar.",
+              "pm.test('desempenho vem ZERADO: ctr, adesao e clientes distintos nao sao declaraveis', function () {",
+              "    pm.expect(corpo.desempenho.ctr).to.eql(0);",
+              "    pm.expect(corpo.desempenho.taxaAdesao).to.eql(0);",
+              "    pm.expect(corpo.desempenho.clientesDistintos).to.eql(0);",
+              "});",
+              "",
+              "pm.test('sinonimos deduplicados e normalizados', function () {",
+              "    pm.expect(corpo.sinonimos).to.eql(['previdencia', 'vgbl', 'aposentadoria privada']);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"{{ofertaId}}\",\n  \"termo\": \"{{termo}}\",\n  \"sinonimos\": [\"Previdência\", \"previdencia\", \"VGBL\", \"aposentadoria privada\"],\n  \"rotulo\": \"abata do seu imposto de renda\",\n  \"destino\": \"/app/investimento/previdencia-vgbl\",\n  \"jornada\": \"investimento\",\n  \"produtoAlvo\": \"{{produto}}\",\n  \"vetaInadimplencia\": true,\n  \"exigeContaAtiva\": true,\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\", \"UNICLASS\", \"PERSONNALITE\", \"PRIVATE\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-12-31T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. le de volta o que ficou gravado",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const corpo = pm.response.json();",
+              "pm.test('e a mesma oferta', function () {",
+              "    pm.expect(corpo.ofertaId).to.eql(pm.collectionVariables.get('ofertaId'));",
+              "    pm.expect(corpo.produtoAlvo).to.eql(pm.collectionVariables.get('produto'));",
+              "    pm.expect(corpo.jornada).to.eql('investimento');",
+              "});",
+              "",
+              "// As restricoes declaradas no cadastro sao as que a Peneira aplica na",
+              "// leitura. A requisicao 5 mostra isso acontecendo.",
+              "pm.test('restricoes declaradas foram gravadas', function () {",
+              "    pm.expect(corpo.vetaInadimplencia).to.be.true;",
+              "    pm.expect(corpo.exigeContaAtiva).to.be.true;",
+              "    pm.expect(corpo.exigeElegibilidade).to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{host}}/v1/ofertas/{{ofertaId}}",
+          "host": ["{{host}}"],
+          "path": ["v1", "ofertas", "{{ofertaId}}"]
+        }
+      }
+    },
+    {
+      "name": "3. A OFERTA RECEM-CADASTRADA JA APARECE NA BUSCA",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "",
+              "const corpo = pm.response.json();",
+              "",
+              "// O coracao da collection. A oferta tem clientes_distintos = 0, porque",
+              "// ninguem a buscou ainda. Sob a regra antiga - piso de k-anonimato",
+              "// aplicado a todos os tipos - ela ficaria invisivel ate acumular trinta",
+              "// buscas que nunca aconteceriam, porque ela nao aparece.",
+              "//",
+              "// O piso vale so para termo vindo do log: nome de produto nao conta nada",
+              "// sobre ninguem, nao ha sujeito para reidentificar.",
+              "pm.test('melhorOferta traz o ID acionavel que a jornada cadastrou', function () {",
+              "    pm.expect(corpo.melhorOferta, 'melhorOferta ausente').to.not.be.undefined;",
+              "    pm.expect(corpo.melhorOferta.ofertaId).to.eql(pm.collectionVariables.get('ofertaId'));",
+              "    pm.expect(corpo.melhorOferta.produtoAlvo).to.eql(pm.collectionVariables.get('produto'));",
+              "    pm.expect(corpo.melhorOferta.jornada).to.eql('investimento');",
+              "});",
+              "",
+              "pm.test('melhorOferta traz a POSICAO, que liga a resposta a impressao', function () {",
+              "    pm.expect(corpo.melhorOferta.posicao).to.be.a('number');",
+              "    pm.expect(corpo.itens[corpo.melhorOferta.posicao].ofertaId)",
+              "      .to.eql(corpo.melhorOferta.ofertaId);",
+              "});",
+              "",
+              "pm.test('a linha da lista carrega identidade: ofertaId, jornada e produtoAlvo', function () {",
+              "    const linha = corpo.itens.find(i => i.ofertaId === pm.collectionVariables.get('ofertaId'));",
+              "    pm.expect(linha, 'oferta nao esta na lista').to.not.be.undefined;",
+              "    pm.expect(linha.produtoAlvo).to.eql(pm.collectionVariables.get('produto'));",
+              "    pm.expect(linha.destino).to.eql('/app/investimento/previdencia-vgbl');",
+              "    pm.expect(linha.rotulo).to.eql('abata do seu imposto de renda');",
+              "});",
+              "",
+              "// Linha que nao e oferta tem ofertaId vazio. Vazio significa 'nao e",
+              "// oferta', nunca 'oferta cujo id nao sabemos'.",
+              "pm.test('linha que nao e oferta tem ofertaId vazio, nunca nulo', function () {",
+              "    corpo.itens.filter(i => !i.produtoAlvo).forEach(i => {",
+              "        pm.expect(i.ofertaId, 'termo: ' + i.termo).to.eql('');",
+              "    });",
+              "});",
+              "",
+              "console.log('--- lista para q=' + pm.collectionVariables.get('prefixo') + ' ---');",
+              "corpo.itens.forEach(i => console.log(",
+              "    '  ' + i.posicao + ' ' + i.origem.padEnd(9) + ' ' +",
+              "    i.termo.padEnd(30) + ' ' + (i.ofertaId || '-')));",
+              "console.log('  melhorOferta: ' + corpo.melhorOferta.ofertaId +",
+              "            '  jornadaLider: ' + (corpo.explicacao ? corpo.explicacao.jornadaLider : 'n/d'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Cliente-Id", "value": "{{clienteElegivel}}" },
+          { "key": "X-Cliente-Segmento", "value": "PF" },
+          { "key": "X-Cliente-Relacionamento", "value": "VAREJO" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&explicar=true",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [
+            { "key": "q", "value": "{{prefixo}}" },
+            { "key": "explicar", "value": "true" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. limite=1 devolve o item da posicao 0, nao outro",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "const corpo = pm.response.json();",
+              "",
+              "// A propriedade que importa para quem integra: pedir N devolve",
+              "// exatamente os N primeiros de pedir o maximo. O teto corta o fim da",
+              "// lista; ele nunca reordena o comeco.",
+              "pm.test('exatamente 1 item', function () {",
+              "    pm.expect(corpo.itens).to.have.lengthOf(1);",
+              "    pm.expect(corpo.itens[0].posicao).to.eql(0);",
+              "});",
+              "",
+              "pm.test('e a mesma melhorOferta de quando se pede oito', function () {",
+              "    pm.expect(corpo.melhorOferta.ofertaId).to.eql(pm.collectionVariables.get('ofertaId'));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Cliente-Id", "value": "{{clienteElegivel}}" },
+          { "key": "X-Cliente-Segmento", "value": "PF" },
+          { "key": "X-Cliente-Relacionamento", "value": "VAREJO" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&limite=1",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [
+            { "key": "q", "value": "{{prefixo}}" },
+            { "key": "limite", "value": "1" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. a restricao do cadastro vale na busca (conta inadimplente)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200 - a busca nao devolve erro por conta do perfil', () => pm.response.to.have.status(200));",
+              "const corpo = pm.response.json();",
+              "",
+              "// vetaInadimplencia: true foi DECLARADO no cadastro (requisicao 1) e e",
+              "// aplicado aqui, na leitura, pela Peneira. O mesmo campo nas duas pontas.",
+              "pm.test('a oferta NAO aparece para quem a restricao veta', function () {",
+              "    const achou = corpo.itens.find(i => i.ofertaId === pm.collectionVariables.get('ofertaId'));",
+              "    pm.expect(achou, 'oferta vetada apareceu na lista').to.be.undefined;",
+              "});",
+              "",
+              "// Ausencia de melhorOferta e INFORMACAO, nao erro: significa que para",
+              "// esta pessoa e este prefixo nao ha oferta elegivel.",
+              "pm.test('melhorOferta ausente - e informacao, nao erro', function () {",
+              "    pm.expect(corpo.melhorOferta).to.be.undefined;",
+              "});",
+              "",
+              "if (corpo.explicacao) {",
+              "    pm.test('o descarte diz o MOTIVO: CONTA_INADIMPLENTE', function () {",
+              "        const motivos = corpo.explicacao.descartes.map(d => d.motivo);",
+              "        pm.expect(motivos).to.include('CONTA_INADIMPLENTE');",
+              "    });",
+              "    console.log('--- descartes para ' + pm.collectionVariables.get('clienteInadimplente') + ' ---');",
+              "    corpo.explicacao.descartes.forEach(d => console.log('  ' + d.motivo.padEnd(24) + d.termo));",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Cliente-Id", "value": "{{clienteInadimplente}}" },
+          { "key": "X-Cliente-Segmento", "value": "PF" },
+          { "key": "X-Cliente-Relacionamento", "value": "VAREJO" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&explicar=true",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [
+            { "key": "q", "value": "{{prefixo}}" },
+            { "key": "explicar", "value": "true" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. reenvio do mesmo cadastro e idempotente (200, nao 201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Agora o cadastro existe de certeza - a requisicao 1 ja rodou. Entao",
+              "// aqui o 200 e estrito, e e ele que prova a idempotencia.",
+              "//",
+              "// Nao e conveniencia: e o que permite a jornada reenviar depois de um",
+              "// timeout sem precisar saber se a primeira tentativa chegou. E um 200",
+              "// onde se esperava 201 avisa que o identificador colidiu.",
+              "pm.test('status 200 - substituiu, nao criou um segundo', () => pm.response.to.have.status(200));",
+              "",
+              "const corpo = pm.response.json();",
+              "pm.test('o rotulo corrigido foi gravado', function () {",
+              "    pm.expect(corpo.rotulo).to.eql('rotulo corrigido no reenvio');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"{{ofertaId}}\",\n  \"termo\": \"{{termo}}\",\n  \"sinonimos\": [\"Previdência\", \"previdencia\", \"VGBL\", \"aposentadoria privada\"],\n  \"rotulo\": \"rotulo corrigido no reenvio\",\n  \"destino\": \"/app/investimento/previdencia-vgbl\",\n  \"jornada\": \"investimento\",\n  \"produtoAlvo\": \"{{produto}}\",\n  \"vetaInadimplencia\": true,\n  \"exigeContaAtiva\": true,\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\", \"UNICLASS\", \"PERSONNALITE\", \"PRIVATE\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-12-31T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "7. cadastro sem as restricoes declaradas e aceito (Boolean, nao boolean)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Regressao. Com boolean PRIMITIVO no record do corpo recebido, campo",
+              "// ausente nao vira false: o Jackson recusa o corpo inteiro com 400 e",
+              "// corpo vazio, porque FAIL_ON_NULL_FOR_PRIMITIVES vem ligado no Spring",
+              "// Boot e um record nao tem valor inicial para ele cair.",
+              "//",
+              "// Quem simplesmente nao declarasse uma restricao que nao se aplica",
+              "// recebia o erro menos acionavel possivel, numa chamada razoavel.",
+              "pm.test('status 2xx - restricao ausente nao e erro', function () {",
+              "    pm.expect([200, 201]).to.include(pm.response.code);",
+              "});",
+              "",
+              "const corpo = pm.response.json();",
+              "pm.test('restricao ausente vira false, nao true', function () {",
+              "    pm.expect(corpo.exigeElegibilidade).to.be.false;",
+              "    pm.expect(corpo.vetaInadimplencia).to.be.false;",
+              "    pm.expect(corpo.exigeContaAtiva).to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"OFR-TESTE-SEM-RESTRICOES\",\n  \"termo\": \"conta digital sem tarifa\",\n  \"destino\": \"/app/conta/digital\",\n  \"jornada\": \"conta\",\n  \"produtoAlvo\": \"CONTA_DIGITAL\",\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-12-31T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "8. validacao: TODAS as violacoes numa resposta so (422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// 422 e nao 400: 400 diz 'nao consegui ler o que voce mandou' e a",
+              "// correcao e no serializador; 422 diz 'li perfeitamente e recusei' e a",
+              "// correcao e no valor.",
+              "pm.test('status 422', () => pm.response.to.have.status(422));",
+              "",
+              "pm.test('content-type e application/problem+json (RFC 9457)', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('problem+json');",
+              "});",
+              "",
+              "const p = pm.response.json();",
+              "pm.test('type e URI estavel, para o programa casar sem ler portugues', function () {",
+              "    pm.expect(p.type).to.eql('https://sugestao-busca.dev/problemas/oferta-invalida');",
+              "});",
+              "",
+              "// Recusar no primeiro problema transformaria a integracao numa sequencia",
+              "// de tentativas, uma por campo errado, cada uma precisando de um ciclo de",
+              "// deploy do lado de quem integra.",
+              "pm.test('acumula as OITO violacoes, nao para na primeira', function () {",
+              "    const campos = p.violacoes.map(v => v.campo).sort();",
+              "    pm.expect(campos).to.eql([",
+              "        'destino', 'gatilhos', 'jornada', 'ofertaId',",
+              "        'produtoAlvo', 'relacionamentos', 'segmentos', 'vigenciaFim'",
+              "    ]);",
+              "});",
+              "",
+              "pm.test('cada violacao tem codigo legivel por programa', function () {",
+              "    p.violacoes.forEach(v => {",
+              "        pm.expect(v.codigo, 'campo ' + v.campo).to.be.a('string').and.not.empty;",
+              "        pm.expect(v.mensagem, 'campo ' + v.campo).to.be.a('string').and.not.empty;",
+              "    });",
+              "});",
+              "",
+              "// Aceitar https:// faria do cadastro de oferta um redirecionador aberto,",
+              "// com o nome do banco na frente.",
+              "pm.test('destino absoluto e recusado por formato', function () {",
+              "    const d = p.violacoes.find(v => v.campo === 'destino');",
+              "    pm.expect(d.codigo).to.eql('formato');",
+              "});",
+              "",
+              "pm.test('a mensagem cita o valor recebido, para quem integra achar o erro', function () {",
+              "    const s = p.violacoes.find(v => v.campo === 'segmentos');",
+              "    pm.expect(s.mensagem).to.include('PESSOA_FISICA');",
+              "});",
+              "",
+              "console.log('--- as ' + p.violacoes.length + ' violacoes ---');",
+              "p.violacoes.forEach(v => console.log('  ' + v.campo.padEnd(18) + v.codigo.padEnd(17) + v.mensagem));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ofertaId\": \"x\",\n  \"termo\": \"oferta de teste\",\n  \"destino\": \"https://site-de-phishing.example/pix\",\n  \"jornada\": \"busca\",\n  \"gatilhos\": [\"GATILHO INVALIDO!\"],\n  \"segmentos\": [\"PESSOA_FISICA\"],\n  \"relacionamentos\": [\"BLACK\"],\n  \"vigenciaInicio\": \"2027-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2026-01-01T00:00:00Z\"\n}"
+        }
+      }
+    },
+    {
+      "name": "9. oferta inexistente: 404 problem+json, nao 500",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 404', () => pm.response.to.have.status(404));",
+              "pm.test('problem+json com type proprio', function () {",
+              "    const p = pm.response.json();",
+              "    pm.expect(p.type).to.eql('https://sugestao-busca.dev/problemas/oferta-nao-encontrada');",
+              "    pm.expect(p.ofertaId).to.eql('OFR-NAO-EXISTE');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{host}}/v1/ofertas/OFR-NAO-EXISTE",
+          "host": ["{{host}}"],
+          "path": ["v1", "ofertas", "OFR-NAO-EXISTE"]
+        }
+      }
+    },
+    {
+      "name": "10. a busca nunca devolve erro, qualquer que seja a entrada",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Uma caixa de busca que devolve 400 enquanto a pessoa digita e pior do",
+              "// que uma que devolve nada. E recusar com erro informa ao chamador",
+              "// abusivo onde exatamente esta o limite que ele deveria respeitar.",
+              "pm.test('status 200 mesmo com limite ilegivel e explicar sem sentido', () => pm.response.to.have.status(200));",
+              "",
+              "const corpo = pm.response.json();",
+              "pm.test('devolveu lista', function () {",
+              "    pm.expect(corpo.itens).to.be.an('array');",
+              "});",
+              "",
+              "// A explicacao lista os descartes, e os descartes dizem quais produtos o",
+              "// cliente nao pode contratar. Interpretar generosamente seria vazar",
+              "// informacao sobre a pessoa por causa de uma query mal escrita.",
+              "pm.test('explicar com valor estranho DESLIGA a explicacao (falha fechada)', function () {",
+              "    pm.expect(corpo.explicacao).to.be.undefined;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Cliente-Id", "value": "{{clienteElegivel}}" },
+          { "key": "X-Cliente-Segmento", "value": "PF" },
+          { "key": "X-Cliente-Relacionamento", "value": "FAIXA_QUE_NAO_EXISTE" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&limite=tres&explicar=qualquercoisa",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [
+            { "key": "q", "value": "{{prefixo}}" },
+            { "key": "limite", "value": "tres" },
+            { "key": "explicar", "value": "qualquercoisa" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "11. CORS: um cliente de navegador consegue chamar?",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// O preflight que o navegador manda antes do GET, porque os cabecalhos",
+              "// X-Cliente-* nao estao na lista segura do CORS.",
+              "//",
+              "// Sem isto a API responde normal a curl e e BLOQUEADA pelo navegador: o",
+              "// 200 chega e o JavaScript nunca ve o corpo. No DevTools aparece como",
+              "// erro de rede, o que manda investigar o lugar errado.",
+              "pm.test('preflight autorizado', () => pm.response.to.have.status(200));",
+              "",
+              "pm.test('ecoa a origem, e nao um curinga', function () {",
+              "    pm.expect(pm.response.headers.get('Access-Control-Allow-Origin'))",
+              "      .to.eql('http://localhost:3000');",
+              "});",
+              "",
+              "pm.test('autoriza os cabecalhos de identidade do cliente', function () {",
+              "    const h = (pm.response.headers.get('Access-Control-Allow-Headers') || '').toLowerCase();",
+              "    pm.expect(h).to.include('x-cliente-id');",
+              "    pm.expect(h).to.include('x-cliente-segmento');",
+              "    pm.expect(h).to.include('x-cliente-relacionamento');",
+              "});",
+              "",
+              "// Numa caixa que consulta a cada tecla, um preflight por GET dobraria as",
+              "// requisicoes. O maxAge e o que faz o navegador parar de perguntar.",
+              "pm.test('preflight e cacheado (maxAge), senao dobraria o trafego', function () {",
+              "    const idade = parseInt(pm.response.headers.get('Access-Control-Max-Age'), 10);",
+              "    pm.expect(idade).to.be.above(0);",
+              "    console.log('  Access-Control-Max-Age: ' + idade + ' s');",
+              "});",
+              "",
+              "// Location sai no 201 do cadastro, e sem expo-lo o JavaScript nao",
+              "// consegue le-lo: o navegador so entrega ao script os cabecalhos da",
+              "// lista segura.",
+              "pm.test('Location e exposto, para o script poder ler o 201 do cadastro', function () {",
+              "    pm.expect(pm.response.headers.get('Access-Control-Expose-Headers')).to.include('Location');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          { "key": "Origin", "value": "http://localhost:3000" },
+          { "key": "Access-Control-Request-Method", "value": "GET" },
+          { "key": "Access-Control-Request-Headers", "value": "x-cliente-id,x-cliente-segmento,x-cliente-relacionamento" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [{ "key": "q", "value": "{{prefixo}}" }]
+        }
+      }
+    },
+    {
+      "name": "12. CORS: origem desconhecida e recusada",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// sugestao.cors.origens vem VAZIO por padrao, e vazio significa nenhuma",
+              "// origem autorizada - nao todas. Um '*' funcionaria em todo lugar,",
+              "// inclusive em producao.",
+              "pm.test('preflight de origem nao listada e recusado (403)', () => pm.response.to.have.status(403));",
+              "",
+              "// headers.get() devolve undefined para cabecalho ausente, nao null.",
+              "// Afirmar null passa a eternidade reprovando um comportamento correto.",
+              "pm.test('nao vaza Allow-Origin para quem nao foi autorizado', function () {",
+              "    pm.expect(pm.response.headers.has('Access-Control-Allow-Origin')).to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          { "key": "Origin", "value": "https://site-qualquer.example" },
+          { "key": "Access-Control-Request-Method", "value": "GET" }
+        ],
+        "url": {
+          "raw": "{{host}}/v1/sugestoes?q={{prefixo}}",
+          "host": ["{{host}}"],
+          "path": ["v1", "sugestoes"],
+          "query": [{ "key": "q", "value": "{{prefixo}}" }]
+        }
+      }
+    }
+  ]
+}
