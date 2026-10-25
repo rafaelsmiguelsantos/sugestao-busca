@@ -95,6 +95,11 @@ ilegível, `limite` absurdo, `explicar` com texto sem sentido, faixa inexistente
 nenhum cabeçalho — tudo isso é `200` com lista vazia, limitada ou degradada. Não
 escreva tratamento de `4xx` para ela; escreva tratamento de **lista vazia**.
 
+Com uma fronteira, medida: acima de **~7,9 KB de URL** o Tomcat devolve `400`
+antes de a aplicação ver a requisição — é o teto de cabeçalho do container, não
+uma regra nossa. Nenhum teclado produz isso. Um `useEffect` em laço produz, e é
+o único caso em que esta rota responde `4xx`.
+
 ### Os campos que mudam a tela
 
 | campo | para que serve |

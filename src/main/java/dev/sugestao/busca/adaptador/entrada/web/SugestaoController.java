@@ -18,6 +18,15 @@ import org.springframework.web.bind.annotation.RestController;
  * ou lista degradada antes de chegar neste ponto. Uma caixa de busca que devolve
  * 500 enquanto a pessoa digita é pior do que uma que devolve nada.
  *
+ * <p><strong>Com uma fronteira, medida:</strong> a <em>aplicação</em> nunca
+ * devolve erro, e acima de cerca de 7,9 KB de URL o <em>servidor</em> devolve
+ * 400 antes de esta classe existir. É o teto de cabeçalho do Tomcat, e a
+ * requisição morre no container — o {@code prefixoMaximo} daqui nem chega a ser
+ * consultado. A defesa é boa e não é nossa, e vale escrever porque a frase
+ * "nunca devolve erro" estava absoluta e era falsa: nenhum teclado produz 7,9 KB,
+ * mas um cliente mal escrito num laço produz, e aí o 400 aparece onde a
+ * documentação prometia 200.
+ *
  * <p>Os dois parâmetros opcionais chegam como texto, e não como {@code boolean}
  * e {@code int}, pelo mesmo motivo. A conversão do Spring falha alto: um
  * {@code ?explicar=sim} ou {@code ?limite=tres} vira 400 antes de qualquer

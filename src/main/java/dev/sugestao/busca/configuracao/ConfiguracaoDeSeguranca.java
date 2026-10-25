@@ -1,5 +1,6 @@
 package dev.sugestao.busca.configuracao;
 
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -159,6 +160,24 @@ public class ConfiguracaoDeSeguranca {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(rotas -> rotas
+                        // O despacho de ERRO passa pela cadeia de novo, e sem
+                        // isto ele é NEGADO.
+                        //
+                        // O efeito é pior do que parece e foi achado sondando: o
+                        // container rejeita a requisição — firewall de caminho,
+                        // cabeçalho grande demais, método não suportado —, faz
+                        // forward para /error, e /error não casa com nenhuma
+                        // regra. Cai no denyAll, e como o despacho de erro não
+                        // carrega autenticação, o cliente recebe
+                        // <strong>401 "autentique-se"</strong> no lugar do 400
+                        // que era a resposta certa.
+                        //
+                        // Mandar quem errou a requisição trocar de credencial é
+                        // o conselho errado, e ele some o erro de verdade. Vale
+                        // para todo erro despachado pelo container, não só para
+                        // o caso que revelou isto.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+
                         // Saúde é pública: é o que o balanceador consulta, e ele
                         // não tem token. 'info' e 'metrics' NÃO são — métrica de
                         // latência por rota conta o desenho do serviço a quem
