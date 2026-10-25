@@ -31,4 +31,32 @@ final class Candidatos {
         return new Candidato(termo, "", "/app/" + termo, "credito", "",
                 Restricoes.NENHUMA, List.of(gatilho), 1000, 1.0, Origem.CATALOGO);
     }
+
+    /**
+     * Uma oferta acionável: tem identificador e produto, vem do catálogo, e
+     * nasce com zero clientes distintos — que é o estado real de uma oferta
+     * recém-cadastrada.
+     */
+    static Candidato oferta(String termo, String ofertaId, String produto) {
+        return new Candidato(ofertaId, termo, "", "/app/" + termo, "credito", produto,
+                Restricoes.NENHUMA, List.of(), 0, 1.0, Origem.CATALOGO, Procedencia.CATALOGO);
+    }
+
+    static Candidato oferta(String termo, String ofertaId, String produto, double relevancia) {
+        return new Candidato(ofertaId, termo, "", "/app/" + termo, "credito", produto,
+                Restricoes.NENHUMA, List.of(), 0, relevancia, Origem.CATALOGO, Procedencia.CATALOGO);
+    }
+
+    /** Oferta com gatilho, para o caminho da promoção a evento. */
+    static Candidato ofertaComGatilho(String termo, String ofertaId, String produto, String gatilho) {
+        return new Candidato(ofertaId, termo, "", "/app/" + termo, "credito", produto,
+                Restricoes.NENHUMA, List.of(gatilho), 0, 1.0, Origem.CATALOGO, Procedencia.CATALOGO);
+    }
+
+    /** Termo agregado do log: responde pelo piso de k-anonimato. */
+    static Candidato doLog(String termo, int clientesDistintos, String gatilho) {
+        return new Candidato("", termo, "", "/busca", "busca", "",
+                Restricoes.NENHUMA, gatilho == null ? List.of() : List.of(gatilho),
+                clientesDistintos, 1.0, Origem.POPULAR, Procedencia.LOG);
+    }
 }

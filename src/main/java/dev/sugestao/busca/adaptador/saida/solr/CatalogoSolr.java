@@ -5,6 +5,7 @@ import dev.sugestao.busca.dominio.Candidato;
 import dev.sugestao.busca.dominio.ContextoDeBusca;
 import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Prefixo;
+import dev.sugestao.busca.dominio.Procedencia;
 import dev.sugestao.busca.dominio.Restricoes;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.common.SolrDocument;
@@ -41,14 +42,21 @@ public class CatalogoSolr implements CatalogoDeSugestoes {
     }
 
     private static Candidato paraCandidato(SolrDocument doc) {
-        String tipo = texto(doc, "tipo");
+        boolean doLog = "consulta".equals(texto(doc, "tipo"));
 
         // A consulta veio do log de busca de muita gente: é a camada popular, e
         // é ela que o piso de k-anonimato protege. O resto foi curado por
-        // alguém e tem vigência e elegibilidade declaradas: é catálogo.
-        Origem origem = "consulta".equals(tipo) ? Origem.POPULAR : Origem.CATALOGO;
+        // alguém, ou cadastrado por uma jornada, e tem vigência e elegibilidade
+        // declaradas: é catálogo.
+        //
+        // É o único ponto do projeto onde a procedência é decidida a partir do
+        // dado, e por isso o único onde ela pode ser decidida errado. Tudo
+        // depois daqui a propaga; nada depois daqui a recalcula.
+        Origem origem = doLog ? Origem.POPULAR : Origem.CATALOGO;
+        Procedencia procedencia = doLog ? Procedencia.LOG : Procedencia.CATALOGO;
 
         return new Candidato(
+                texto(doc, "oferta_id_s"),
                 texto(doc, "termo"),
                 texto(doc, "rotulo_s"),
                 texto(doc, "destino_s"),
@@ -61,7 +69,8 @@ public class CatalogoSolr implements CatalogoDeSugestoes {
                 lista(doc, "gatilho_ss"),
                 inteiro(doc, "clientes_distintos_i"),
                 decimal(doc, "score"),
-                origem);
+                origem,
+                procedencia);
     }
 
     private static String texto(SolrDocument doc, String campo) {

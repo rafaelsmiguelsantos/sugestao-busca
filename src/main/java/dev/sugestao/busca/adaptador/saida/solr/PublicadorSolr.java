@@ -75,6 +75,13 @@ public class PublicadorSolr implements PublicadorDeVocabulario {
         // é decisão de quem cura, e ninguém curou este termo.
         doc.setField("jornada_s", termo.jornada());
         doc.setField("produto_alvo_s", "");
+
+        // Termo aprendido nao tem identidade de oferta, e escrever vazio aqui e
+        // uma afirmacao, nao um descuido: este documento sobrescreve a versao
+        // anterior dele a cada rodada, e omitir o campo deixaria para tras o
+        // valor de uma publicacao passada. Vazio explicito garante que uma
+        // consulta nunca seja devolvida ao consumidor como oferta acionavel.
+        doc.setField("oferta_id_s", "");
         doc.setField("rotulo_s", "");
         doc.setField("destino_s", "/busca?q=" + chave.replace(' ', '+'));
 

@@ -1,0 +1,471 @@
+###############################################################################
+# Camada de sugestao de busca - requisicoes de ponta a ponta
+#
+# COMO USAR NO VS CODE
+#   Instale a extensao REST Client (id: humao.rest-client). Cada bloco separado
+#   por '###' ganha um link "Send Request" acima dele. Ctrl+Alt+R envia o bloco
+#   onde o cursor esta.
+#
+#   Sem a extensao, veja requisicoes/bater.ps1, que faz as mesmas chamadas pelo
+#   terminal e imprime a resposta formatada.
+#
+# ANTES DE COMECAR
+#   1. .\scripts\solr-local.ps1 start
+#   2. .\scripts\criar-colecao.ps1
+#   3. .\scripts\semear-vocabulario.ps1
+#   4. $env:JAVA_HOME='C:\Users\migue\tools\jdk-25'
+#      .\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
+#
+#   O perfil 'local' liga ?explicar=true e afrouxa os prazos de 18/8/30 ms para
+#   250/100/400. Em producao a explicacao fica DESLIGADA: a lista de descartes
+#   diz quais produtos o cliente nao pode contratar, e isso e informacao sobre a
+#   pessoa, nao sobre a busca.
+#
+# A IDENTIDADE DO CLIENTE
+#   Vem de cabecalho, nao de query string, porque em producao ela vem do token:
+#     X-Cliente-Id             qual cliente
+#     X-Cliente-Segmento       PF | PJ
+#     X-Cliente-Relacionamento VAREJO | UNICLASS | PERSONNALITE | PRIVATE
+#
+#   Segmento e relacionamento viajam separados do perfil de proposito: eles sao
+#   conhecidos antes de qualquer leitura e por isso entram como filtro no indice,
+#   o que permite a consulta ao Solr arrancar junto com a leitura do perfil em
+#   vez de atras dela. E o que faz o orcamento de 30 ms fechar.
+###############################################################################
+
+@host = http://localhost:8080
+@solr = http://localhost:8983/solr/sugestoes
+
+
+###############################################################################
+# 1 - A PERGUNTA CENTRAL: a busca devolve a melhor OFERTA, identificada?
+###############################################################################
+
+### 1.1  Jornada de credito lidera, e melhorOferta traz o id acionavel
+# Olhe, na resposta:
+#   melhorOferta.ofertaId   -> o identificador que a jornada aciona
+#   melhorOferta.posicao    -> em que linha ela saiu (liga a impressao)
+#   explicacao.jornadaLider -> qual intencao o prefixo revelou
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 1.2  So a melhor oferta, uma linha
+# limite=1 devolve exatamente o item da posicao 0 de limite=8. A ordem nao muda
+# com o tamanho: o teto corta o fim da lista, nunca reordena o comeco.
+GET {{host}}/v1/sugestoes?q=emprestim&limite=1&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 1.3  Prefixo que nao casa com oferta nenhuma: melhorOferta nao vem
+# Ausencia e informacao, nao erro. Significa "para esta pessoa e este prefixo
+# nao ha oferta elegivel". Devolver a primeira linha qualquer para o campo nao
+# vir vazio seria inventar oferta.
+GET {{host}}/v1/sugestoes?q=segunda via&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+
+###############################################################################
+# 2 - OS DADOS DA CONTA MUDAM A RESPOSTA
+#
+# Mesmo prefixo, cinco clientes. Compare 'itens' e sobretudo
+# 'explicacao.descartes', que diz o MOTIVO de cada ausencia.
+###############################################################################
+
+### 2.1  Conta operante, sem restricao - ve credito
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 2.2  Conta INADIMPLENTE - credito sai, renegociacao entra
+# Descarte esperado: CONTA_INADIMPLENTE. Esconder a busca nao e o caminho certo
+# para este cliente; o caminho e a jornada de renegociacao, que entra por
+# gatilho e ocupa a linha de evento.
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+X-Cliente-Id: pf-negativado
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 2.3  Conta BLOQUEADA - operacao que exige conta operante sai
+# Descarte esperado: CONTA_NAO_OPERANTE.
+GET {{host}}/v1/sugestoes?q=transfer&explicar=true
+X-Cliente-Id: pf-bloqueado
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 2.4  Sem elegibilidade concedida - oferta condicionada sai
+# Descarte esperado: SEM_ELEGIBILIDADE. Falha fechada: sem concessao explicita,
+# a oferta nao aparece.
+GET {{host}}/v1/sugestoes?q=consignad&explicar=true
+X-Cliente-Id: pf-sem-elegibilidade
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 2.5  Cliente UNICLASS - ve o que a faixa dele permite
+# O corte de faixa e filtro no indice, nao pos-filtro: item de faixa alta nao
+# chega a pontuar para quem nao e da faixa.
+GET {{host}}/v1/sugestoes?q=invest&explicar=true
+X-Cliente-Id: pf-uniclass
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: UNICLASS
+
+### 2.6  Mesmo prefixo, faixa VAREJO - compare com 2.5
+GET {{host}}/v1/sugestoes?q=invest&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 2.7  Pessoa juridica - outro vocabulario
+GET {{host}}/v1/sugestoes?q=maquin&explicar=true
+X-Cliente-Id: pj-lojista
+X-Cliente-Segmento: PJ
+X-Cliente-Relacionamento: VAREJO
+
+### 2.8  Produto JA CONTRATADO nao e oferecido de novo
+# Descarte esperado: PRODUTO_JA_CONTRATADO.
+GET {{host}}/v1/sugestoes?q=invest&explicar=true
+X-Cliente-Id: pf-investidor
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+
+###############################################################################
+# 3 - GATILHO: o evento recente ocupa a primeira linha
+###############################################################################
+
+### 3.1  Pix recusado ha pouco -> antecipacao de limite entra como EVENTO
+# Procure origem: "EVENTO" na posicao 0. A cota garante a linha; ela nao disputa
+# por score, porque um gatilho forte empurraria a lista inteira para uma
+# intencao que o cliente talvez nem estivesse perseguindo.
+GET {{host}}/v1/sugestoes?q=ant&explicar=true
+X-Cliente-Id: pf-pix-recusado
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+
+###############################################################################
+# 4 - CADASTRO DE OFERTA PELA JORNADA DONA
+#
+# E aqui que a oferta ENTRA no sistema. Antes disto, oferta so existia via
+# script lendo um JSON curado a mao.
+#
+# O QUE O CADASTRO NAO ACEITA: ctr, taxaAdesao, clientesDistintos, freq.
+# Sao os quatro numeros que mais mexem no ranking e nenhum e declaravel. Eles
+# sao medidos pelo caminho de aprendizado, a partir de impressao, clique e
+# adesao reais. Se o cadastro os aceitasse, a jornada com a oferta mais fraca e
+# o integrador mais otimista ficaria em primeiro lugar.
+###############################################################################
+
+### 4.1  Cadastra uma oferta nova -> 201 Created + Location
+# A oferta nasce com os quatro contadores em zero e aparece na busca no mesmo
+# instante: o piso de k-anonimato vale so para termo vindo do log.
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{
+  "ofertaId": "OFR-CREDITO-CONSORCIO",
+  "termo": "consórcio de imóvel",
+  "sinonimos": ["consorcio", "carta de credito", "consorcio imobiliario"],
+  "rotulo": "sem juros, com parcelas fixas",
+  "destino": "/app/credito/consorcio-imovel",
+  "jornada": "credito",
+  "produtoAlvo": "CONSORCIO_IMOVEL",
+  "exigeElegibilidade": false,
+  "vetaInadimplencia": true,
+  "exigeContaAtiva": true,
+  "gatilhos": ["simulacao_abandonada_24h"],
+  "segmentos": ["PF"],
+  "relacionamentos": ["VAREJO", "UNICLASS"],
+  "vigenciaInicio": "2026-10-01T00:00:00Z",
+  "vigenciaFim": "2027-10-01T00:00:00Z"
+}
+
+### 4.2  Confere o que FICOU GRAVADO
+# Repare que o termo volta normalizado ("consorcio de imovel", sem acento) e o
+# bloco 'desempenho' esta zerado. Devolver o estado gravado, e nao um eco do
+# enviado, e o que faz o cadastro ser conferivel.
+GET {{host}}/v1/ofertas/OFR-CREDITO-CONSORCIO
+
+### 4.3  A oferta recem-cadastrada JA aparece na busca
+GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 4.4  Mesmo POST de novo -> 200 OK, nao 201
+# Idempotente por ofertaId. Nao e conveniencia: e o que permite a jornada
+# reenviar depois de um timeout sem precisar saber se a primeira chegou.
+# Um 200 onde se esperava 201 avisa que o identificador colidiu.
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{
+  "ofertaId": "OFR-CREDITO-CONSORCIO",
+  "termo": "consórcio de imóvel",
+  "sinonimos": ["consorcio", "carta de credito"],
+  "rotulo": "parcelas fixas, sem juros",
+  "destino": "/app/credito/consorcio-imovel",
+  "jornada": "credito",
+  "produtoAlvo": "CONSORCIO_IMOVEL",
+  "vetaInadimplencia": true,
+  "exigeContaAtiva": true,
+  "segmentos": ["PF"],
+  "relacionamentos": ["VAREJO", "UNICLASS"],
+  "vigenciaInicio": "2026-10-01T00:00:00Z",
+  "vigenciaFim": "2027-10-01T00:00:00Z"
+}
+
+### 4.5  A oferta nao aparece para quem a restricao veta
+# vetaInadimplencia=true no cadastro acima -> descarte CONTA_INADIMPLENTE aqui.
+# A restricao declarada no cadastro e a mesma que a Peneira aplica na leitura.
+GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+X-Cliente-Id: pf-negativado
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 4.6  Nem para quem esta fora da faixa declarada
+# relacionamentos: ["VAREJO","UNICLASS"] -> PERSONNALITE nao ve. E filtro no
+# indice: a oferta nao chega a pontuar.
+GET {{host}}/v1/sugestoes?q=consorc&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: PERSONNALITE
+
+### 4.7  Oferta nao encontrada -> 404 problem+json
+GET {{host}}/v1/ofertas/OFR-NAO-EXISTE
+
+
+###############################################################################
+# 5 - VALIDACAO: todas as violacoes de uma vez
+###############################################################################
+
+### 5.1  Corpo cheio de erros -> 422 com a lista COMPLETA
+# Esperado: ofertaId fora do formato, destino absoluto, jornada reservada,
+# produtoAlvo ausente, segmento desconhecido, faixa desconhecida, vigencia
+# invertida, gatilho mal formado. Oito violacoes numa resposta.
+#
+# Recusar no primeiro problema transformaria a integracao numa sequencia de
+# tentativas, uma por campo, cada uma precisando de um deploy do outro lado.
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{
+  "ofertaId": "x",
+  "termo": "oferta de teste",
+  "destino": "https://site-de-phishing.example/pix",
+  "jornada": "busca",
+  "gatilhos": ["GATILHO INVALIDO!"],
+  "segmentos": ["PESSOA_FISICA"],
+  "relacionamentos": ["BLACK"],
+  "vigenciaInicio": "2027-01-01T00:00:00Z",
+  "vigenciaFim": "2026-01-01T00:00:00Z"
+}
+
+### 5.2  Destino absoluto e recusado sozinho
+# O destino volta para o app e o app navega para ele. Aceitar "https://" aqui
+# faria do cadastro de oferta um redirecionador aberto com o nome do banco na
+# frente. "//" e barrado junto: o navegador o trata como absoluto.
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{
+  "ofertaId": "OFR-TESTE-REDIRECT",
+  "termo": "teste de redirecionamento",
+  "destino": "//evil.example/pix",
+  "jornada": "credito",
+  "produtoAlvo": "TESTE",
+  "segmentos": ["PF"],
+  "relacionamentos": ["VAREJO"],
+  "vigenciaInicio": "2026-10-01T00:00:00Z",
+  "vigenciaFim": "2027-10-01T00:00:00Z"
+}
+
+### 5.3  JSON quebrado -> 400, nao 422
+# 400 diz "nao consegui ler o que voce mandou" e a correcao e no serializador.
+# 422 diz "li perfeitamente e recusei" e a correcao e no valor.
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{ "ofertaId": "OFR-X", "termo": }
+
+### 5.4  Data fora do ISO-8601 -> 400 com o formato esperado no detail
+POST {{host}}/v1/ofertas
+Content-Type: application/json
+
+{
+  "ofertaId": "OFR-TESTE-DATA",
+  "termo": "teste de data",
+  "destino": "/app/teste",
+  "jornada": "credito",
+  "produtoAlvo": "TESTE",
+  "segmentos": ["PF"],
+  "relacionamentos": ["VAREJO"],
+  "vigenciaInicio": "01/10/2026",
+  "vigenciaFim": "01/10/2027"
+}
+
+### 5.5  Metodo errado -> 405, nao 500
+# A rede de seguranca do TratadorDeErros estende ResponseEntityExceptionHandler
+# justamente para isto: caminho inexistente, metodo errado e Content-Type nao
+# suportado mantem o status certo em vez de virarem 500.
+DELETE {{host}}/v1/ofertas/OFR-CREDITO-CONSORCIO
+
+### 5.6  Caminho inexistente -> 404, nao 500
+GET {{host}}/v1/nao-existe
+
+
+###############################################################################
+# 6 - PARAMETROS DE ENTRADA DA BUSCA: tolerancia por decisao
+#
+# Esta rota NUNCA devolve erro. Nenhum dos blocos abaixo da status != 200.
+# Uma caixa de busca que devolve 400 enquanto a pessoa digita e pior do que uma
+# que devolve nada.
+###############################################################################
+
+### 6.1  Prefixo curto demais -> lista vazia, 200
+# Com um caractere o leque de candidatos e o indice inteiro, e o prazo de 18 ms
+# nao se sustenta.
+GET {{host}}/v1/sugestoes?q=e
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 6.2  q ausente -> lista vazia, 200
+GET {{host}}/v1/sugestoes
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 6.3  limite ilegivel -> cai no padrao, 200
+GET {{host}}/v1/sugestoes?q=emprestim&limite=tres
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 6.4  limite acima do teto -> limitado em silencio a 8, 200
+# O teto protege o servico. Recusar com erro ensinaria ao chamador onde
+# exatamente esta o limite, e transformaria um pedido grande demais em falha
+# quando devolver oito e uma resposta perfeitamente util.
+GET {{host}}/v1/sugestoes?q=a&limite=100000
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 6.5  explicar com valor estranho -> DESLIGA (falha fechada)
+# A explicacao lista os descartes, e os descartes dizem quais produtos o
+# cliente nao pode contratar. Interpretar generosamente seria vazar informacao
+# sobre a pessoa por causa de uma query mal escrita.
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=qualquercoisa
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+### 6.6  Sem cabecalho de cliente -> lista do segmento, degradada=true
+# O app usa 'degradada' para nao registrar a impressao como personalizada;
+# senao a camada de aprendizado aprenderia com ruido.
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+
+### 6.7  Faixa desconhecida no cabecalho -> cai em VAREJO, 200
+# Aqui a leitura e leniente de proposito, e erra para o lado seguro: a lista
+# fica mais pobre, nunca mais rica. Errar para cima ofereceria produto de faixa
+# alta a quem nao tem direito. No CADASTRO a conta e outra, e la o mesmo valor
+# e recusado (bloco 5.1).
+GET {{host}}/v1/sugestoes?q=invest&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: FAIXA_QUE_NAO_EXISTE
+
+
+###############################################################################
+# 7 - CAMINHO DE ESCRITA: o que o cliente digita vira comportamento
+###############################################################################
+
+### 7.1  Registra o que foi exibido e o que foi clicado
+# Repare que NAO existe campo clienteId no corpo. Ele vem do cabecalho, que em
+# producao vem do token: aceitar clienteId no corpo deixaria qualquer chamador
+# escrever comportamento em nome de qualquer pessoa.
+POST {{host}}/v1/eventos
+Content-Type: application/json
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+[
+  { "tipo": "BUSCA_DIGITADA",   "termo": "emprestimo pessoal" },
+  { "tipo": "SUGESTAO_EXIBIDA", "termosExibidos": ["emprestimo pessoal", "credito consignado"] },
+  { "tipo": "SUGESTAO_CLICADA", "termo": "emprestimo pessoal", "posicao": 0 },
+  { "tipo": "ADESAO",           "termo": "emprestimo pessoal" }
+]
+
+### 7.2  PII e barrada na entrada
+# CPF com digito verificador valido, cartao que passa no Luhn, e-mail, chave Pix
+# em UUID e sequencia numerica longa: todos recusados.
+#
+# A resposta diz QUANTOS caiu e por que motivo, e NUNCA devolve o termo barrado
+# — devolve-lo no corpo do erro recriaria o vazamento que o saneamento evitou.
+POST {{host}}/v1/eventos
+Content-Type: application/json
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+[
+  { "tipo": "BUSCA_DIGITADA", "termo": "pagar boleto 529.982.247-25" },
+  { "tipo": "BUSCA_DIGITADA", "termo": "cartao 4539 1488 0343 6467" },
+  { "tipo": "BUSCA_DIGITADA", "termo": "pix para joao@exemplo.com" },
+  { "tipo": "BUSCA_DIGITADA", "termo": "chave 123e4567-e89b-12d3-a456-426614174000" },
+  { "tipo": "BUSCA_DIGITADA", "termo": "emprestimo pessoal" }
+]
+
+### 7.3  Roda o aprendizado agora (so no perfil local)
+# Consome a fila, agrega por janela, aplica o piso de k-anonimato e publica.
+# DESLIGADO em producao: e um gatilho que da para disparar em laco.
+POST {{host}}/v1/aprendizado/rodar
+
+### 7.4  Depois do 7.3, o historico do cliente volta para ele
+# Procure origem: "HISTORICO". Esta camada nao passa pelo indice: ela ja esta no
+# perfil, custa zero na requisicao, e por nao sair do dono nao tem como vazar
+# para ninguem.
+GET {{host}}/v1/sugestoes?q=emprestim&explicar=true
+X-Cliente-Id: pf-novo
+X-Cliente-Segmento: PF
+X-Cliente-Relacionamento: VAREJO
+
+
+###############################################################################
+# 8 - SAUDE E METRICA
+###############################################################################
+
+### 8.1  Saude
+GET {{host}}/actuator/health
+
+### 8.2  Percentis de latencia da busca
+# Olhe para o p99, nao para a media. A media esconde a cauda, e e a cauda que a
+# pessoa sente enquanto digita.
+GET {{host}}/actuator/metrics/http.server.requests?tag=uri:/v1/sugestoes
+
+
+###############################################################################
+# 9 - DIRETO NO SOLR: conferir o invariante de privacidade
+###############################################################################
+
+### 9.1  Termos de log ABAIXO do piso existem no indice
+# Eles estao la e NAO podem aparecer em sugestao nenhuma.
+GET {{solr}}/select?q=*:*&rows=20&wt=json&fq=tipo:consulta&fq=clientes_distintos_i:%5B*%20TO%2029%5D&fl=termo,clientes_distintos_i
+
+### 9.2  O fq do servico os remove, e mantem as ofertas com k=0
+# Esperado: 93 de 101 documentos. Os 8 que faltam sao os de 9.1.
+# As 18 ofertas passam com clientes_distintos_i=0, porque o piso vale so para
+# termo vindo do log — nome de produto nao conta nada sobre ninguem.
+GET {{solr}}/select?q=*:*&rows=0&wt=json&fq=(*:*%20-tipo:consulta)%20OR%20clientes_distintos_i:%5B30%20TO%20*%5D
+
+### 9.3  Contagem por tipo
+GET {{solr}}/select?q=*:*&rows=0&wt=json&facet=true&facet.field=tipo
+
+### 9.4  As ofertas e seus identificadores
+GET {{solr}}/select?q=tipo:oferta&rows=30&wt=json&fl=oferta_id_s,termo,produto_alvo_s,jornada_s,clientes_distintos_i

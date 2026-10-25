@@ -46,7 +46,7 @@ public final class ClassificadorDeOrigem {
      */
     private boolean ehOportuno(Candidato candidato, Perfil perfil) {
         return candidato.origem() != Origem.EVENTO
-                && candidato.origem().veioDoIndice()
+                && candidato.procedencia().temScoreDoIndice()
                 && perfil.temAlgumGatilho(candidato.gatilhos());
     }
 }

@@ -127,6 +127,57 @@ class PeneiraTest {
     }
 
     @Test
+    @DisplayName("oferta de catálogo com zero clientes distintos sobrevive ao piso")
+    void ofertaDeCatalogoNaoRespondePeloPiso() {
+        // O caso que motivou a separação entre Origem e Procedencia. Uma oferta
+        // que uma jornada acabou de cadastrar tem zero clientes distintos,
+        // porque ninguém a buscou ainda — e com o piso aplicado a tudo ela
+        // ficaria invisível até acumular trinta buscas que nunca aconteceriam,
+        // porque ela não aparece.
+        //
+        // Não há o que anonimizar num nome de produto: não existe sujeito para
+        // reidentificar. O piso protege termo digitado por gente.
+        var oferta = Candidatos.oferta("consórcio de imóvel", "OFR-CREDITO-CONSORCIO", "CONSORCIO");
+
+        var peneirada = peneira.aplicar(List.of(oferta), Perfil.NEUTRO);
+
+        assertThat(peneirada.sobreviventes()).hasSize(1);
+        assertThat(peneirada.descartes()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("promover oferta de catálogo a evento não passa a aplicar o piso a ela")
+    void promocaoPreservaAProcedenciaDoCatalogo() {
+        // O espelho de eventoTambemRespondePeloPiso. Promover muda onde a linha
+        // aparece, não de onde o dado veio: se a procedência fosse deduzida da
+        // origem depois da promoção, EVENTO cairia em LOG — a opção restritiva
+        // — e a oferta com gatilho desapareceria justamente na linha que o
+        // gatilho conquistou.
+        var promovida = Candidatos
+                .oferta("antecipação de limite", "OFR-CREDITO-ANTECIPACAO", "ANTECIPACAO")
+                .com(Origem.EVENTO);
+
+        assertThat(promovida.procedencia()).isEqualTo(Procedencia.CATALOGO);
+        assertThat(peneira.aplicar(List.of(promovida), Perfil.NEUTRO).sobreviventes()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("termo do log promovido a evento continua respondendo pelo piso")
+    void promocaoPreservaAProcedenciaDoLog() {
+        // A outra metade da mesma regra, e a que é controle de privacidade: a
+        // promoção não pode ser um jeito de escapar do piso.
+        var promovido = Candidatos.doLog("adiantamento para maria silva", 2, "pix_recusado_72h")
+                .com(Origem.EVENTO);
+
+        assertThat(promovido.procedencia()).isEqualTo(Procedencia.LOG);
+
+        var peneirada = peneira.aplicar(List.of(promovido), Perfil.NEUTRO);
+        assertThat(peneirada.sobreviventes()).isEmpty();
+        assertThat(peneirada.descartes()).singleElement()
+                .extracting(Descarte::motivo).isEqualTo(MotivoDeDescarte.ABAIXO_DO_PISO);
+    }
+
+    @Test
     @DisplayName("o piso não se aplica ao histórico: o dono recebendo o próprio dado não é vazamento")
     void historicoNaoRespondePeloPiso() {
         // Zero clientes distintos: ninguém mais digitou isto, e é exatamente

@@ -55,6 +55,7 @@
     { "name": "tipo",           "type": "string",  "indexed": true,  "stored": true },
     { "name": "jornada_s",      "type": "string",  "indexed": true,  "stored": true },
     { "name": "produto_alvo_s", "type": "string",  "indexed": true,  "stored": true },
+    { "name": "oferta_id_s",    "type": "string",  "indexed": true,  "stored": true },
     { "name": "destino_s",      "type": "string",  "indexed": false, "stored": true },
     { "name": "rotulo_s",       "type": "string",  "indexed": false, "stored": true },
 

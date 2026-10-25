@@ -36,13 +36,12 @@ import java.util.Map;
  */
 public final class Rankeador {
 
-    /**
-     * {@code busca} não é jornada, é a ausência de uma: é o balde dos termos
-     * vindos do log e do histórico. Deixá-la concorrer faria dela a líder quase
-     * sempre, só por ser a mais numerosa — e o efeito seria inclinar a lista
-     * para "mais do mesmo texto" em vez de para uma intenção.
+    /*
+     * O sentinela de "sem jornada" mora em Jornada.AUSENTE. Deixa-la concorrer
+     * faria dela a lider quase sempre, so por ser a mais numerosa — e o efeito
+     * seria inclinar a lista para "mais do mesmo texto" em vez de para uma
+     * intencao.
      */
-    private static final String SEM_JORNADA = "busca";
 
     public Ranqueamento ranquear(List<Candidato> candidatos, Perfil perfil, PesosDeRanking pesos) {
         if (candidatos.isEmpty()) {
@@ -88,14 +87,13 @@ public final class Rankeador {
         Map<String, Double> forca = new HashMap<>();
 
         for (Candidato candidato : candidatos) {
-            if (!candidato.origem().veioDoIndice()) {
+            if (!candidato.procedencia().temScoreDoIndice()) {
                 continue;
             }
-            String jornada = candidato.jornada();
-            if (jornada == null || jornada.isBlank() || SEM_JORNADA.equals(jornada)) {
+            if (Jornada.ausente(candidato.jornada())) {
                 continue;
             }
-            forca.merge(jornada, candidato.relevancia(), Double::sum);
+            forca.merge(candidato.jornada(), candidato.relevancia(), Double::sum);
         }
 
         if (forca.isEmpty()) {
@@ -123,7 +121,7 @@ public final class Rankeador {
      */
     private List<Candidato> normalizar(List<Candidato> candidatos) {
         double maior = candidatos.stream()
-                .filter(c -> c.origem().veioDoIndice())
+                .filter(c -> c.procedencia().temScoreDoIndice())
                 .mapToDouble(Candidato::relevancia)
                 .max()
                 .orElse(0.0);
@@ -132,7 +130,7 @@ public final class Rankeador {
             return candidatos;
         }
         return candidatos.stream()
-                .map(c -> c.origem().veioDoIndice() ? c.com(c.relevancia() / maior) : c)
+                .map(c -> c.procedencia().temScoreDoIndice() ? c.com(c.relevancia() / maior) : c)
                 .toList();
     }
 

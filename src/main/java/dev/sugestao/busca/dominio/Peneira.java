@@ -49,7 +49,11 @@ public final class Peneira {
 
     /** {@code null} quando o candidato passa. */
     private MotivoDeDescarte julgar(Candidato candidato, Perfil perfil) {
-        if (candidato.origem().veioDoIndice()
+        // Procedência, não origem. Origem diz onde a linha aparece e muda sob
+        // promoção; procedência diz de onde o dado veio e não muda. Oferta
+        // cadastrada por uma jornada tem zero clientes distintos no dia em que
+        // nasce, e não há ninguém para reidentificar num nome de produto.
+        if (candidato.procedencia().respondePeloPisoDeKAnonimato()
                 && candidato.clientesDistintos() < pisoKAnonimato) {
             return MotivoDeDescarte.ABAIXO_DO_PISO;
         }

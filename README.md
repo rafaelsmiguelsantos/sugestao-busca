@@ -96,6 +96,71 @@ sai com código 1 se um termo abaixo do piso aparecer em qualquer consulta, ou s
 um termo publicado não for alcançável por nenhum prefixo plausível. Nenhum dos
 dois tem faixa aceitável.
 
+### Bater nos endpoints
+
+Duas formas, as mesmas chamadas. Não há tela: a evidência é a resposta.
+
+**No VS Code** — [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http), com a
+extensão REST Client (`humao.rest-client`). Cada bloco separado por `###` ganha um
+link *Send Request*; `Ctrl+Alt+R` envia o bloco do cursor. Os blocos estão
+agrupados por pergunta, e cada um explica o que olhar na resposta.
+
+**No terminal** — [`requisicoes/bater.ps1`](requisicoes/bater.ps1), sem precisar de
+extensão nenhuma. Ele resume a resposta no que importa para cada pergunta:
+
+```powershell
+.\requisicoes\bater.ps1 -Lista                  # cenarios disponiveis
+.\requisicoes\bater.ps1 -Cenario oferta         # a melhor oferta, identificada
+.\requisicoes\bater.ps1 -Cenario conta          # os dados da conta mudam a resposta
+.\requisicoes\bater.ps1 -Cenario cadastro       # a jornada cadastra a propria oferta
+.\requisicoes\bater.ps1 -Cenario validacao      # todas as violacoes de uma vez
+.\requisicoes\bater.ps1 -Cenario privacidade    # o piso de k-anonimato, medido
+.\requisicoes\bater.ps1 -Cenario entrada        # esta rota nunca devolve erro
+.\requisicoes\bater.ps1 -Cenario latencia       # percentis, nao media
+.\requisicoes\bater.ps1                         # todos
+```
+
+Use o perfil `local` para os dois: ele liga `?explicar=true` e afrouxa os prazos.
+
+### A oferta, de ponta a ponta
+
+A pergunta que o desenho precisa responder não é "quais palavras completam o que
+a pessoa digitou", é **"qual oferta eu apresento a esta pessoa agora"**. As duas
+pontas disso são o cadastro e a resposta.
+
+Uma jornada cadastra a própria oferta:
+
+```powershell
+curl.exe -s -X POST "http://localhost:8080/v1/ofertas" -H "Content-Type: application/json" -d "@exemplo.json"
+# 201 Created, Location: /v1/ofertas/OFR-CREDITO-CONSORCIO
+```
+
+E a busca já a devolve identificada, com a melhor no topo:
+
+```jsonc
+{
+  "prefixo": "consorc",
+  "degradada": false,
+  "melhorOferta": {
+    "ofertaId": "OFR-CREDITO-CONSORCIO",   // o que a jornada aciona
+    "produtoAlvo": "CONSORCIO_IMOVEL",
+    "jornada": "credito",
+    "posicao": 0,                          // liga a resposta a impressao
+    "relevancia": 2.0
+  },
+  "itens": [ /* ... a lista, cada linha com ofertaId quando e oferta ... */ ]
+}
+```
+
+O cadastro **não aceita** `ctr`, `taxaAdesao` nem `clientesDistintos`: são os
+números que mais mexem no ranking e nenhum é declarável. A oferta nova entra com
+os quatro em zero e sobe pelo que acontecer com ela. Ver
+[`docs/decisoes.md`](docs/decisoes.md), decisão 3.
+
+E a oferta nasce visível com zero clientes distintos, porque o piso de
+k-anonimato vale só para termo vindo do log — não há ninguém para reidentificar
+num nome de produto. Decisão 2.
+
 ### A demonstração
 
 A mesma letra, perfis diferentes. O segmento e a identidade viajam em cabeçalho
@@ -324,15 +389,30 @@ do arquivo passa a ser lido como código.
 
 ## Decisões que já estão no código
 
+O registro completo, com o que foi recusado e por quê, está em
+[`docs/decisoes.md`](docs/decisoes.md). O resumo:
+
+- **`clientes_distintos_i` entra como `fq`, e só para `tipo:consulta`.** O piso de
+  k-anonimato protege termo digitado por gente; nome de produto não conta nada
+  sobre ninguém. Por muito tempo valeu para tudo, e o preço era um contador falso
+  escrito no catálogo só para o item passar — dado inventado exatamente onde se
+  audita privacidade. Decisão 2.
+- **`Procedencia` é separada de `Origem`.** Uma diz de onde o dado veio e não
+  muda; a outra diz onde a linha aparece e é sobrescrita por promoção a evento.
+  Juntas, uma oferta promovida por gatilho escapava do piso.
+- **O cadastro de oferta recusa `ctr`, `taxaAdesao` e `clientesDistintos`.** Eles
+  são medidos, não declarados. Decisão 3.
+- **`destino` é caminho relativo, nunca URL absoluta.** O app navega para ele;
+  aceitar `https://` faria do cadastro um redirecionador aberto. Decisão 4.
+- **A validação acumula todas as violações** e sai em `problem+json`. Decisão 5.
+- **`GET /v1/sugestoes` não tem caminho de erro.** Nenhuma entrada produz status
+  diferente de 200. Decisão 9.
 - **Não existe starter do Spring para Solr** desde o Boot 2.4. O SolrJ 10 entra como
   dependência comum e o client vira um `@Bean` nosso.
 - **Duas análises de prefixo**, uma para a frase e outra por palavra, com pesos
   diferentes na consulta. O porquê está em `solr/README.md`.
 - **Sinônimo é campo do documento**, não arquivo de configuração: o negócio edita a
   redação alternativa junto do termo, sem reload.
-- **`clientes_distintos_i` entra como `fq`**, nunca como pós-filtro. É o piso de
-  k-anonimato, e é o único parâmetro do projeto que, afrouxado, vira incidente de
-  privacidade em vez de queda de relevância.
 - **O módulo `ltr` sobe junto, mas não é usado.** As camadas 1 a 3 do desenho
   entregam sem modelo nenhum; a 4 espera impressão registrada com posição.
 - **Produto contratado e elegibilidade não são `fq`.** O segmento vem do token, e é

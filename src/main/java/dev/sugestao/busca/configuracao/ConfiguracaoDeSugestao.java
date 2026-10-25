@@ -9,13 +9,16 @@ import dev.sugestao.busca.adaptador.saida.solr.CatalogoCuradoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.ConsultaDeCandidatos;
 import dev.sugestao.busca.adaptador.saida.solr.PublicadorSolr;
+import dev.sugestao.busca.adaptador.saida.solr.RegistroSolr;
 import dev.sugestao.busca.aplicacao.ParametrosDeAprendizado;
 import dev.sugestao.busca.aplicacao.ParametrosDeSugestao;
 import dev.sugestao.busca.aplicacao.Prazos;
 import dev.sugestao.busca.aplicacao.casodeuso.AprenderComComportamentoCasoDeUso;
+import dev.sugestao.busca.aplicacao.casodeuso.CadastrarOfertaCasoDeUso;
 import dev.sugestao.busca.aplicacao.casodeuso.RegistrarEventosCasoDeUso;
 import dev.sugestao.busca.aplicacao.casodeuso.SugerirSugestoesCasoDeUso;
 import dev.sugestao.busca.aplicacao.porta.entrada.AprenderComComportamento;
+import dev.sugestao.busca.aplicacao.porta.entrada.CadastrarOferta;
 import dev.sugestao.busca.aplicacao.porta.entrada.RegistrarEventos;
 import dev.sugestao.busca.aplicacao.porta.entrada.SugerirSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoCurado;
@@ -23,6 +26,7 @@ import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
 import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
 import dev.sugestao.busca.aplicacao.porta.saida.PublicadorDeVocabulario;
+import dev.sugestao.busca.aplicacao.porta.saida.RegistroDeOfertas;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDePerfil;
 import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
@@ -147,6 +151,7 @@ public class ConfiguracaoDeSugestao {
         var p = props.peso();
         return new ParametrosDeSugestao(
                 props.prefixoMinimo(),
+                props.prefixoMaximo(),
                 props.candidatosSolr(),
                 new Cotas(props.cota().historico(), props.cota().evento(), props.resultadoMaximo()),
                 new PesosDeRanking(p.jornadaLider(), p.produtoDaJornada(),
@@ -231,5 +236,26 @@ public class ConfiguracaoDeSugestao {
     @Bean
     public AgendadorDeAprendizado agendadorDeAprendizado(AprenderComComportamento aprender) {
         return new AgendadorDeAprendizado(aprender);
+    }
+
+    // -----------------------------------------------------------------------
+    // Cadastro de oferta. Terceiro caminho do serviço, e o único sincrono que
+    // pode falhar alto: tem uma jornada esperando confirmação de gravação.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Usa o cliente de publicação, e não o de leitura, pelo mesmo motivo do
+     * publicador: {@code add} seguido de {@code commit} não cabe em 18 ms, e
+     * abandoná-lo no meio grava oferta sem deixá-la visível.
+     */
+    @Bean
+    public RegistroDeOfertas registroDeOfertas(
+            @Qualifier("solrDePublicacao") SolrClient solr, SugestaoProperties props) {
+        return new RegistroSolr(solr, props.solr().colecao());
+    }
+
+    @Bean
+    public CadastrarOferta cadastrarOferta(RegistroDeOfertas registro) {
+        return new CadastrarOfertaCasoDeUso(registro);
     }
 }

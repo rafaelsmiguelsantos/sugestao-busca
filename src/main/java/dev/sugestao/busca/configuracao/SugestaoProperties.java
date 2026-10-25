@@ -19,6 +19,13 @@ public record SugestaoProperties(
         Solr solr,
         Prazo prazo,
         int prefixoMinimo,
+
+        /*
+         * Teto do prefixo. Controle de custo, nao de relevancia: ver
+         * ParametrosDeSugestao.prefixoMaximo.
+         */
+        int prefixoMaximo,
+
         int resultadoMaximo,
         int candidatosSolr,
         Cota cota,

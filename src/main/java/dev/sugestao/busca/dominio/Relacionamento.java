@@ -1,5 +1,7 @@
 package dev.sugestao.busca.dominio;
 
+import java.util.Optional;
+
 /**
  * A faixa de relacionamento do cliente.
  *
@@ -31,6 +33,28 @@ public enum Relacionamento {
             // mais rica. Errar para cima ofereceria produto de faixa alta a
             // quem não tem direito a ele.
             return VAREJO;
+        }
+    }
+
+    /**
+     * A leitura estrita, para o cadastro de oferta.
+     *
+     * <p>{@link #de(String)} erra de propósito e erra para o lado seguro: ele lê
+     * faixa do token de um cliente, onde um valor estranho não pode derrubar a
+     * busca de ninguém. No cadastro a conta é outra. Uma jornada que escreve
+     * "UNICLASS " com espaço, ou "Uniclass Plus", está declarando para quem a
+     * oferta vale — e cair em {@code VAREJO} em silêncio publicaria para a
+     * base inteira uma oferta destinada a uma faixa. O erro silencioso aqui é
+     * exposição de oferta, não lista mais pobre.
+     */
+    public static Optional<Relacionamento> talvez(String texto) {
+        if (texto == null || texto.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(valueOf(texto.trim().toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
         }
     }
 }

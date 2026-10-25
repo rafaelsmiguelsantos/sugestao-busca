@@ -60,6 +60,31 @@ function SementeDe([string] $texto) {
     return $soma
 }
 
+# A identidade da oferta.
+#
+# Item de catalogo sem produto nao e oferta: acao ('segunda via do cartao') e
+# navegacao, entidade sem produto e vocabulario. Esses ficam com oferta_id_s
+# vazio de proposito, e a API nunca os devolve como oferta acionavel.
+#
+# Para quem tem produto, o id e derivado de (jornada, produto) em vez de
+# sorteado, por um motivo so: semear de novo nao pode trocar a identidade das
+# ofertas. Se o id mudasse a cada execucao, toda impressao e todo clique
+# registrados antes apontariam para oferta que nao existe mais, e o caminho de
+# aprendizado perderia o historico a cada reindexacao.
+#
+# Em producao isto nao se deriva: o id vem do cadastro de ofertas, e o POST
+# /v1/ofertas o exige no corpo. A derivacao aqui existe porque este catalogo e
+# um arquivo curado a mao, e um arquivo a mao com 18 codigos digitados tem erro
+# de digitacao. O campo 'ofertaId' do JSON tem precedencia quando presente.
+function IdDaOferta($item) {
+    if ($item.ofertaId) { return [string] $item.ofertaId }
+    if (-not $item.produto) { return '' }
+
+    $jornada = ([string] $item.jornada).ToUpperInvariant() -replace '[^A-Z0-9]', '-'
+    $produto = ([string] $item.produto).ToUpperInvariant() -replace '[^A-Z0-9]', '-'
+    return "OFR-$jornada-$produto"
+}
+
 # As faixas de relacionamento. Um item que nao declara faixa vale para todas, e
 # isso precisa estar escrito em cada documento: o corte e um {!terms}, e campo
 # vazio nao casa com nada.
@@ -75,7 +100,14 @@ $catalogo = Get-Content (Join-Path $raiz 'solr\vocabulario-catalogo.json') -Raw 
 foreach ($item in $catalogo) {
     $chave = ConverterParaChave $item.termo
     $s = SementeDe $chave
-    $tipo = if ($item.tipo) { $item.tipo } else { 'entidade' }
+    # Item com produto e oferta, e o tipo diz isso. Antes caia em 'entidade'
+    # junto com vocabulario sem produto, e o indice nao tinha como distinguir
+    # "coisa que o cliente pode contratar" de "palavra que ele pode digitar".
+    # O POST /v1/ofertas grava 'oferta', e os dois caminhos precisam concordar:
+    # oferta semeada e oferta cadastrada tem de ser o mesmo tipo de documento.
+    $tipo = if ($item.tipo) { $item.tipo }
+            elseif ($item.produto) { 'oferta' }
+            else { 'entidade' }
     $segmentos = if ($item.segmento) { ComoLista $item.segmento } else { ComoLista 'PF' }
 
     # Item sem faixa declarada vale para todas. Precisa ser escrito por extenso:
@@ -94,6 +126,7 @@ foreach ($item in $catalogo) {
         tipo                  = $tipo
         jornada_s             = $item.jornada
         produto_alvo_s        = if ($item.produto) { $item.produto } else { '' }
+        oferta_id_s           = IdDaOferta $item
         destino_s             = "/app/$($item.jornada)/$($chave -replace ' ', '-')"
         rotulo_s              = if ($item.rotulo) { $item.rotulo } else { '' }
         segmento_ss           = $segmentos
@@ -107,7 +140,16 @@ foreach ($item in $catalogo) {
         vigencia_fim_dt       = $agora.AddDays(365).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         visto_em_dt           = $agora.AddHours(-($s % 48)).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         freq_30d_i            = 2000 + ($s % 40000)
-        clientes_distintos_i  = 1500 + ($s % 25000)
+
+        # Zero, e nao um numero alto inventado.
+        #
+        # Catalogo nao e agregado de log: nao existe "quantos clientes distintos
+        # buscaram o produto emprestimo pessoal" medido em lugar nenhum deste
+        # projeto. O numero alto estava aqui so para o item passar pelo fq do
+        # piso de k-anonimato, que valia para todos os tipos. Agora o fq vale so
+        # para tipo:consulta, e este campo pode dizer a verdade: nao medimos.
+        clientes_distintos_i  = 0
+
         ctr_f                 = [double] $item.ctr
         taxa_adesao_f         = [double] $item.adesao
     })
@@ -144,6 +186,7 @@ foreach ($verbo in $grade.Keys) {
             tipo                  = 'consulta'
             jornada_s             = 'busca'
             produto_alvo_s        = ''
+            oferta_id_s           = ''
             destino_s             = "/busca?q=$($termo -replace ' ', '+')"
             rotulo_s              = ''
             segmento_ss           = $segmentos
@@ -187,6 +230,7 @@ foreach ($b in $bloqueados) {
         tipo                  = 'consulta'
         jornada_s             = 'busca'
         produto_alvo_s        = ''
+        oferta_id_s           = ''
         destino_s             = "/busca?q=$($b.termo -replace ' ', '+')"
         rotulo_s              = ''
         segmento_ss           = @('PF')

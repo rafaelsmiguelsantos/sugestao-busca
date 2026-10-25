@@ -35,24 +35,14 @@ public enum Origem {
         return prioridade;
     }
 
-    /**
-     * Se este candidato nasceu no índice — e portanto responde pelo piso de
-     * k-anonimato e pela escala de score do motor de busca.
-     *
-     * <p>{@link #EVENTO} conta, e isso não é detalhe. Evento não é uma origem
-     * própria: é um candidato do índice que o gatilho do perfil promoveu. Se a
-     * promoção fizesse ele deixar de "vir do índice", duas coisas quebrariam de
-     * uma vez — ele escaparia da rede de segurança do piso na {@link Peneira},
-     * que é um controle de privacidade, e ficaria fora da normalização de
-     * escala do {@link Rankeador}, aparecendo com o score bruto do Solr ao lado
-     * de candidatos já reescalados para 0..1. O segundo só deixava o rastro
-     * mentiroso, porque a cota garante a linha do evento de qualquer jeito. O
-     * primeiro era um buraco de verdade.
-     *
-     * <p>O histórico do próprio cliente voltando para ele mesmo continua de
-     * fora: não nasceu no índice e não é vazamento de ninguém.
+    /*
+     * Aqui existia veioDoIndice(), e ele respondia a duas perguntas ao mesmo
+     * tempo: "o piso de k-anonimato se aplica?" e "a relevancia e score do Solr
+     * e precisa ser reescalada?". As duas tinham a mesma resposta enquanto todo
+     * item do indice vinha do log ou de catalogo com contador falso. Deixaram de
+     * ter quando uma jornada passou a cadastrar oferta pela API: oferta nova tem
+     * zero clientes distintos e score do Solr — resposta "nao" para a primeira
+     * pergunta e "sim" para a segunda. As duas agora moram em Procedencia, que
+     * nao e sobrescrita por promocao.
      */
-    public boolean veioDoIndice() {
-        return this == CATALOGO || this == POPULAR || this == EVENTO;
-    }
 }

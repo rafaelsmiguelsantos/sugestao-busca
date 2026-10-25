@@ -57,7 +57,23 @@ public class ConsultaDeCandidatos {
         // não chega a pontuar, nem a ser contado. Afrouxar este número é o
         // único parâmetro do projeto que vira incidente de privacidade em vez
         // de queda de relevância.
-        query.addFilterQuery("clientes_distintos_i:[" + pisoKAnonimato + " TO *]");
+        //
+        // E vale só para tipo:consulta, que é o que veio do log de busca de
+        // gente. Por muito tempo valeu para tudo, e parecia mais seguro. Não
+        // era: o catálogo não tinha trinta clientes distintos para declarar,
+        // então o semeador escrevia um número alto inventado em cada item só
+        // para o item passar. A regra estava certa e aplicada no lugar errado, e
+        // o preço era um dado falso no índice — exatamente onde ninguém olha
+        // para auditar privacidade.
+        //
+        // Agora oferta cadastrada por jornada entra com zero e aparece no mesmo
+        // instante, e o piso continua intocado onde ele significa algo: termo
+        // digitado por pouca gente não sai daqui, promovido a evento ou não.
+        //
+        // A forma é disjuntiva de propósito, e lida em voz alta é a regra:
+        // "ou não é termo do log, ou limpa o piso".
+        query.addFilterQuery(
+                "(*:* -tipo:consulta) OR clientes_distintos_i:[" + pisoKAnonimato + " TO *]");
 
         // Produto contratado, elegibilidade e situação da conta seriam fq aqui
         // se o perfil chegasse antes da consulta. Ele não chega — as duas
@@ -83,7 +99,7 @@ public class ConsultaDeCandidatos {
         // depende do perfil e porque quem garante a linha do evento é a cota.
 
         query.setRows(limite);
-        query.setFields("termo", "rotulo_s", "destino_s", "jornada_s", "tipo",
+        query.setFields("oferta_id_s", "termo", "rotulo_s", "destino_s", "jornada_s", "tipo",
                 "produto_alvo_s", "exige_elegibilidade_b", "veta_inadimplencia_b",
                 "exige_conta_ativa_b", "gatilho_ss", "clientes_distintos_i", "score");
 

@@ -7,10 +7,23 @@
     build. Sao dois alarmes, e nenhum deles tem faixa aceitavel: qualquer valor
     acima de zero e defeito de construcao, nao de relevancia.
 
-      1. K-ANONIMATO   Nenhum termo abaixo do piso de clientes distintos pode
-                       aparecer em nenhuma consulta, para nenhum prefixo. O
+      1. K-ANONIMATO   Nenhum termo DE LOG abaixo do piso de clientes distintos
+                       pode aparecer em nenhuma consulta, para nenhum prefixo. O
                        teste usa exatamente os mesmos fq da producao - se o
                        filtro nao for o mesmo, o portao nao prova nada.
+
+                       "De log" quer dizer tipo:consulta, e a restricao e o
+                       ponto. O piso protege termo digitado por gente: um termo
+                       que so tres pessoas buscaram, devolvido a um quarto,
+                       conta algo sobre aquelas tres. Nome de produto que o
+                       banco oferece nao conta nada sobre ninguem, e oferta
+                       recem-cadastrada tem zero clientes distintos porque
+                       ninguem a buscou ainda.
+
+                       Enquanto este alarme olhava todos os tipos, ele acusava
+                       cada item de catalogo como vazamento assim que o contador
+                       falso saiu do semeador - 44 alarmes falsos, que e o
+                       numero exato de alarmes que fazem um portao ser ignorado.
 
       2. ZERO-RESULTADO
                        Todo termo publicado precisa ser alcancavel por alguma
@@ -41,7 +54,7 @@ param(
     [string]   $BaseUrl = 'http://localhost:8983/solr',
     [string]   $Colecao = 'sugestoes',
     [int]      $Piso    = 30,
-    [string[]] $TiposSugeriveis = @('consulta', 'acao', 'entidade'),
+    [string[]] $TiposSugeriveis = @('consulta', 'acao', 'entidade', 'oferta'),
     [int]      $PrefixoMaximo = 12
 )
 
@@ -65,13 +78,18 @@ function Selecionar([string[]] $parametros) {
 
 # Os mesmos filtros de ConsultaDeCandidatos.java. Se um dos dois mudar sem o
 # outro, este portao passa a aprovar o que a producao recusa, ou o contrario.
+#
+# O fq do piso e disjuntivo, e lido em voz alta e a regra: "ou nao e termo do
+# log, ou limpa o piso". Precisa ser identico ao de ConsultaDeCandidatos.java.
+$FqDoPiso = "(*:* -tipo:consulta) OR clientes_distintos_i:[$Piso TO *]"
+
 function ConsultarComoAProducao([string] $prefixo, [string] $segmento, [int] $linhas) {
     $fq = @(
         "tipo:($($TiposSugeriveis -join ' OR '))"
         'vigencia_inicio_dt:[* TO NOW]'
         'vigencia_fim_dt:[NOW TO *]'
         "{!terms f=segmento_ss}$segmento"
-        "clientes_distintos_i:[$Piso TO *]"
+        $FqDoPiso
     )
 
     $parametros = @(
@@ -92,15 +110,18 @@ Write-Host ''
 # ---------------------------------------------------------------------------
 # 1. K-anonimato
 # ---------------------------------------------------------------------------
+# Apenas tipo:consulta. Sao estes que o piso protege, e so eles que ele deve
+# acusar. Ver a nota de cabecalho.
 $abaixoDoPiso = @((Selecionar @(
     'q=*:*'
     'rows=1000'
     'fl=termo'
     'wt=json'
+    'fq=tipo:consulta'
     "fq=$(Escapar "clientes_distintos_i:[* TO $($Piso - 1)]")"
 )).docs.termo)
 
-Write-Host ("1. K-anonimato: {0} termos publicados abaixo do piso." -f $abaixoDoPiso.Count)
+Write-Host ("1. K-anonimato: {0} termos de log abaixo do piso." -f $abaixoDoPiso.Count)
 
 $vazamentos = New-Object System.Collections.ArrayList
 $prefixosTestados = 0
@@ -138,16 +159,24 @@ if ($vazamentos.Count -gt 0) {
 # 2. Zero-resultado
 # ---------------------------------------------------------------------------
 Write-Host ''
+# O mesmo fq do piso que a producao usa, e nao 'clientes_distintos_i >= piso'.
+#
+# A diferenca nao e cosmetica. Com o filtro antigo, assim que o contador falso
+# saiu do catalogo este alarme passou a enxergar 49 documentos em vez de 93:
+# todos os itens de catalogo e TODAS as ofertas cadastradas saiam da amostra, em
+# silencio. O portao continuava verde porque estava conferindo menos, nao porque
+# estava tudo certo - um alarme que encolhe a propria cobertura e pior que um
+# alarme ausente, porque ele passa a dar garantia de algo que nao verifica.
 $publicados = @((Selecionar @(
     'q=*:*'
     'rows=5000'
     'fl=termo,segmento_ss'
     'wt=json'
-    "fq=$(Escapar "clientes_distintos_i:[$Piso TO *]")"
+    "fq=$(Escapar $FqDoPiso)"
     "fq=$(Escapar "tipo:($($TiposSugeriveis -join ' OR '))")"
 )).docs)
 
-Write-Host ("2. Zero-resultado: {0} termos publicados a conferir." -f $publicados.Count)
+Write-Host ("2. Zero-resultado: {0} termos sugeriveis a conferir." -f $publicados.Count)
 
 # O inicio da frase e o inicio de cada palavra: os prefixos que alguem digitaria
 # para chegar neste termo. Dois caracteres, que e o minGram dos dois campos.

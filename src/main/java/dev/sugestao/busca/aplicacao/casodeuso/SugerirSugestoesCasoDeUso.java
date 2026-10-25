@@ -77,10 +77,19 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         Prefixo prefixo = Prefixo.de(consulta.prefixoDigitado());
         var cliente = consulta.cliente();
 
-        // O corte mais barato do conjunto, e o único que acontece antes de
-        // qualquer rede. Com um caractere, o leque de candidatos é o índice
+        // Os dois cortes mais baratos do conjunto, e os únicos que acontecem
+        // antes de qualquer rede.
+        //
+        // Curto demais: com um caractere, o leque de candidatos é o índice
         // inteiro e o prazo de 18 ms não se sustenta.
-        if (prefixo.curtoDemais(parametros.prefixoMinimo())) {
+        //
+        // Longo demais: o analisador de prefixo é trabalho de CPU proporcional
+        // ao texto, pago no Solr, a cada tecla. Nenhum dos dois é erro — os dois
+        // são lista vazia, porque uma caixa de busca que devolve 400 enquanto a
+        // pessoa digita é pior do que uma que devolve nada, e porque recusar com
+        // erro informa ao chamador abusivo onde exatamente está o limite.
+        if (prefixo.curtoDemais(parametros.prefixoMinimo())
+                || prefixo.longoDemais(parametros.prefixoMaximo())) {
             return new ResultadoDaSugestao(
                     ListaDeSugestoes.vazia(),
                     rastroDeRecusa(consulta, prefixo, cliente, inicio));
@@ -143,7 +152,15 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         var ranqueamento = rankeador.ranquear(
                 peneirada.sobreviventes(), perfil, parametros.pesos());
 
-        var mistura = misturador.misturar(ranqueamento.candidatos(), parametros.cotas());
+        // O limite da requisição entra só aqui, na mistura, e não na consulta ao
+        // índice. Pedir menos candidatos ao Solr porque o chamador pediu uma
+        // linha economizaria rede e trocaria a resposta: a peneira derruba
+        // candidato por perfil, e com cinco candidatos buscados pode não sobrar
+        // nenhum. O leque é sempre largo; o corte é no fim.
+        var cotas = parametros.cotas().comLimite(
+                parametros.limiteEfetivo(consulta.limiteSolicitado()));
+
+        var mistura = misturador.misturar(ranqueamento.candidatos(), cotas);
 
         var descartes = new ArrayList<Descarte>(peneirada.descartes());
         descartes.addAll(mistura.descartes());
