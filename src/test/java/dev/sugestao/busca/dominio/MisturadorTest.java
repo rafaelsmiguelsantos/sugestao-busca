@@ -94,17 +94,25 @@ class MisturadorTest {
     }
 
     @Test
-    @DisplayName("score do índice e score do histórico são postos na mesma escala antes de competir")
-    void normalizaScoresDeOrigensDiferentes() {
-        // O Solr devolve score em escala própria; aqui, uma ordem de grandeza
-        // acima do histórico. Sem normalizar, o histórico nunca entraria.
+    @DisplayName("o Misturador NÃO pontua: ele obedece a relevância que recebeu")
+    void naoPontuaObedece() {
+        // Este teste se chamava "score do índice e do histórico são postos na
+        // mesma escala antes de competir" e não verificava nada: a normalização
+        // mudou para o Rankeador, e as asserções antigas passavam com ou sem
+        // ela, porque o candidato do índice vinha com score maior de qualquer
+        // forma. Um teste que passa nos dois mundos não guarda nenhum.
+        //
+        // O que o Misturador faz é obedecer. Aqui o histórico chega com
+        // relevância MAIOR — como chegaria depois de o Rankeador reescalar o
+        // score do Solr para 0..1 — e ele tem de sair na frente. Se o
+        // Misturador voltasse a pontuar, esta ordem inverteria.
         var candidatos = List.of(
-                Candidatos.doIndice("popular alto", 87.4, 1000),
+                Candidatos.doIndice("popular", 0.40, 1000),
                 Candidatos.de("meu historico", Origem.HISTORICO, 0.95));
 
         var mistura = misturador.misturar(candidatos, Cotas.padrao());
 
-        assertThat(mistura.escolhidos().getFirst().origem()).isEqualTo(Origem.POPULAR);
-        assertThat(mistura.escolhidos()).hasSize(2);
+        assertThat(mistura.escolhidos()).extracting(Candidato::termo)
+                .containsExactly("meu historico", "popular");
     }
 }

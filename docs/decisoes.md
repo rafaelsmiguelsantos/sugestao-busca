@@ -509,6 +509,16 @@ são resolvidas. Nenhum destes é descuido — estão aqui para não virarem sur
 **~~Não há autorização em `POST /v1/ofertas`.~~** Resolvido na decisão 14: o
 token carrega a jornada e o caso de uso confere o corpo contra ela.
 
+**A afinidade não esfria sozinha.** A escrita de perfil deixou de sobrescrever
+com vazio — porque vazio significava "esta janela não viu nada", e um clique sem
+busca apagava o histórico inteiro da pessoa. O preço é que uma janela sem cliques
+também não zera a afinidade: interesse antigo continua inclinando a lista. O que
+segura é o teto de `PesosDeRanking.afinidadeMaxima`, que é multiplicador e só
+promove, mais a cota do `Misturador`. Esfriar de verdade pede **decaimento
+explícito** — multiplicar por um fator a cada rodada, em vez de substituir — e é
+a próxima coisa a fazer nessa parte. Trocar apagamento instantâneo por
+esfriamento lento é o lado certo de errar.
+
 **A revogação de token não existe.** Um JWT assinado vale até expirar, e os
 tokens deste POC valem 60 minutos. Não há lista de revogados nem introspecção, o
 que significa que um token vazado vale uma hora. Com provedor de verdade isso é

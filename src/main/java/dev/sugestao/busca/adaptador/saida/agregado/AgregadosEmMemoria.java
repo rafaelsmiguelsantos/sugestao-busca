@@ -1,6 +1,7 @@
 package dev.sugestao.busca.adaptador.saida.agregado;
 
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
+import dev.sugestao.busca.dominio.Jornada;
 import dev.sugestao.busca.dominio.Normalizacao;
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
@@ -152,11 +153,29 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
     private static void somarAfinidade(
             Map<String, Map<String, Double>> afinidades, String cliente, String jornada, double peso) {
 
-        if (jornada == null || jornada.isBlank()) {
+        // Normaliza pela mesma função que normaliza a jornada no cadastro de
+        // oferta. Sem isto, um app que manda "Crédito" cria um balde que nunca
+        // casa com o `jornada_s` do índice, que é "credito": a afinidade é
+        // contada, guardada, e não produz impulso nenhum. Falha silenciosa, do
+        // tipo que se descobre meses depois perguntando por que o ranking por
+        // comportamento não mexe em nada.
+        String chave = Normalizacao.aplicar(jornada);
+
+        // E o sentinela de "sem jornada" não acumula.
+        //
+        // O Rankeador barra `busca` da eleição de jornada líder de propósito —
+        // ela é o balde dos termos do log e do histórico, e deixá-la concorrer
+        // faria dela a líder quase sempre, só por ser a mais numerosa. Mas a
+        // afinidade era aplicada por jornada do candidato, inclusive para esse
+        // balde: três cliques em linha de histórico davam afinidade 1,0 com
+        // `busca`, e aí TODA linha vinda do log passava a ser promovida. O sinal
+        // mais fraco do conjunto virava o mais forte, pela porta de trás.
+        if (Jornada.ausente(chave)) {
             return;
         }
+
         afinidades.computeIfAbsent(cliente, c -> new HashMap<>())
-                .merge(jornada, peso, Double::sum);
+                .merge(chave, peso, Double::sum);
     }
 
     /**

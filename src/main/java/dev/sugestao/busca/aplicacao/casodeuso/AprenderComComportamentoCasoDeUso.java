@@ -59,6 +59,23 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
         var lote = fila.consumir(parametros.loteDeConsumo());
         agregados.acumular(lote);
 
+        // O perfil é atualizado ANTES do caminho de vocabulário, e a ordem é
+        // uma correção.
+        //
+        // Atualizar perfil não precisa de Solr: histórico e afinidade saem do
+        // agregado em memória. Mas a classificação de jornada precisa — ela lê o
+        // catálogo curado do índice — e ela estava antes daqui. Com o Solr fora,
+        // a leitura do catálogo estourava e levava consigo a atualização de
+        // perfil, que teria funcionado sozinha. Um caminho que não depende da
+        // dependência passou a depender dela por acidente de ordenação.
+        //
+        // Agora a rodada entrega o que consegue: perfil primeiro, vocabulário
+        // depois. Se o índice estiver fora, os termos ficam no agregado e a
+        // próxima rodada publica — o agendador é o mecanismo de nova tentativa.
+        var comportamentos = agregados.comportamentos(
+                parametros.janelaDoComportamento(), parametros.tamanhoDoHistorico());
+        perfis.atualizar(comportamentos);
+
         var termos = agregados.termos(parametros.janelaDoVocabulario());
 
         // A régua é lida uma vez por rodada, não por termo. Classificar aqui, e
@@ -79,10 +96,6 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
         }
 
         int publicados = publicaveis.isEmpty() ? 0 : publicador.publicar(publicaveis);
-
-        var comportamentos = agregados.comportamentos(
-                parametros.janelaDoComportamento(), parametros.tamanhoDoHistorico());
-        perfis.atualizar(comportamentos);
 
         return new ResultadoDoAprendizado(
                 lote.size(),

@@ -11,6 +11,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class RankeadorTest {
 
+    @Test
+    @DisplayName("score do índice e do histórico são postos na mesma escala antes de competir")
+    void normalizaScoresDeOrigensDiferentes() {
+        // Veio do MisturadorTest, onde a normalização morava antes e onde o
+        // teste tinha parado de verificá-la.
+        //
+        // O Solr devolve score em escala própria — aqui duas ordens de grandeza
+        // acima do histórico, que nasce entre 0 e 1 porque é calculado neste
+        // serviço. Sem reescalar, qual origem ganha é acidente de magnitude e o
+        // histórico nunca entraria.
+        var candidatos = List.of(
+                Candidatos.doIndice("popular alto", 87.4, 1000),
+                Candidatos.doIndice("popular medio", 43.7, 1000),
+                Candidatos.de("meu historico", Origem.HISTORICO, 0.95));
+
+        var ranqueado = new Rankeador().ranquear(candidatos, Perfil.NEUTRO, PesosDeRanking.padrao());
+
+        var porTermo = ranqueado.candidatos().stream()
+                .collect(java.util.stream.Collectors.toMap(Candidato::termo, Candidato::relevancia));
+
+        // O maior do índice vai a 1,0; o do meio, à metade. O histórico não é
+        // tocado: ele não nasceu no motor de busca.
+        assertThat(porTermo.get("popular alto")).isEqualTo(1.0);
+        assertThat(porTermo.get("popular medio"))
+                .isCloseTo(0.5, org.assertj.core.api.Assertions.within(0.01));
+        assertThat(porTermo.get("meu historico")).isEqualTo(0.95);
+
+        // E agora o histórico de fato compete: ele fica à frente do score médio.
+        assertThat(porTermo.get("meu historico")).isGreaterThan(porTermo.get("popular medio"));
+    }
+
     private final Rankeador rankeador = new Rankeador();
     private final PesosDeRanking pesos = PesosDeRanking.padrao();
 

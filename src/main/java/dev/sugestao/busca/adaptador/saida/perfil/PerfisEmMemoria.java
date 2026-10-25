@@ -61,16 +61,41 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
      */
     private static Perfil mesclar(Perfil atual, ComportamentoDoCliente novo) {
         return new Perfil(
-                novo.historico(),
+                // Vazio NÃO sobrescreve, e esta é a correção de um apagamento
+                // permanente.
+                //
+                // A agregação devolve um cliente quando ele teve QUALQUER evento
+                // na janela, e monta cada dimensão só do que viu. Um cliente que
+                // clicou numa sugestão e não digitou nada em 24 h chegava aqui
+                // com histórico vazio — e o vazio era gravado sobre o histórico
+                // guardado. Um clique apagava a camada HISTORICO da pessoa, para
+                // sempre, e o único sintoma era a lista dela ficar mais pobre.
+                //
+                // Vazio aqui significa "esta janela não teve nada a dizer sobre
+                // esta dimensão", nunca "esta pessoa não tem nada".
+                novo.historico().isEmpty() ? atual.historico() : novo.historico(),
+
                 atual.gatilhosAtivos(),
                 atual.produtosContratados(),
                 atual.elegibilidades(),
                 atual.situacaoDaConta(),
-                // Afinidade é comportamento de busca, então esta é a fonte dela
-                // e pode sobrescrever. A janela é curta de propósito: interesse
-                // que parou de ser demonstrado precisa poder esfriar, senão um
-                // clique de três semanas atrás inclina a lista para sempre.
-                novo.afinidadePorJornada(),
+
+                // Mesma regra para a afinidade, pelo mesmo motivo: um cliente
+                // que buscou e não clicou em 24 h chegava com o mapa vazio e
+                // perdia a afinidade inteira.
+                //
+                // Isto tem um preço, e é consciente: com janela vazia a
+                // afinidade deixa de esfriar, e interesse antigo continua
+                // inclinando a lista. O que segura é o teto de
+                // PesosDeRanking.afinidadeMaxima, que é multiplicador e só
+                // promove, mais a cota do Misturador. Esfriar de verdade pede
+                // decaimento explícito — um fator por rodada em vez de
+                // substituição — e está nos limites declarados de
+                // docs/decisoes.md. Trocar apagamento instantâneo por
+                // esfriamento lento é o lado certo de errar.
+                novo.afinidadePorJornada().isEmpty()
+                        ? atual.afinidadePorJornada()
+                        : novo.afinidadePorJornada(),
                 true);
     }
 
