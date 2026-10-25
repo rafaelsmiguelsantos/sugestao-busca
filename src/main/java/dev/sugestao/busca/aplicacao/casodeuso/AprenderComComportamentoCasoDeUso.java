@@ -75,7 +75,8 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
         var comportamentos = agregados.comportamentos(
                 parametros.janelaDoComportamento(),
                 parametros.tamanhoDoHistorico(),
-                parametros.afinidade());
+                parametros.afinidade(),
+                parametros.fadiga());
         perfis.atualizar(comportamentos);
 
         var termos = agregados.termos(parametros.janelaDoVocabulario());

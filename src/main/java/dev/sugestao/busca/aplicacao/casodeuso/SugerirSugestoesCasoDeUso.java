@@ -3,10 +3,12 @@ package dev.sugestao.busca.aplicacao.casodeuso;
 import dev.sugestao.busca.aplicacao.Colheita;
 import dev.sugestao.busca.aplicacao.ParametrosDeSugestao;
 import dev.sugestao.busca.aplicacao.RastroDaSugestao;
+import dev.sugestao.busca.aplicacao.ToleranciaAplicada;
 import dev.sugestao.busca.aplicacao.porta.entrada.ConsultaDeSugestao;
 import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDaSugestao;
 import dev.sugestao.busca.aplicacao.porta.entrada.SugerirSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
+import dev.sugestao.busca.aplicacao.porta.saida.MedidorDeBusca;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDePerfil;
 import dev.sugestao.busca.dominio.Candidato;
 import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
@@ -53,6 +55,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
     private final Rankeador rankeador;
     private final Misturador misturador;
     private final ParametrosDeSugestao parametros;
+    private final MedidorDeBusca medidor;
 
     public SugerirSugestoesCasoDeUso(
             CatalogoDeSugestoes catalogo,
@@ -61,7 +64,8 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
             Peneira peneira,
             Rankeador rankeador,
             Misturador misturador,
-            ParametrosDeSugestao parametros) {
+            ParametrosDeSugestao parametros,
+            MedidorDeBusca medidor) {
         this.catalogo = catalogo;
         this.perfis = perfis;
         this.classificador = classificador;
@@ -69,6 +73,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         this.rankeador = rankeador;
         this.misturador = misturador;
         this.parametros = parametros;
+        this.medidor = medidor == null ? MedidorDeBusca.NULO : medidor;
     }
 
     @Override
@@ -90,9 +95,9 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         // erro informa ao chamador abusivo onde exatamente está o limite.
         if (prefixo.curtoDemais(parametros.prefixoMinimo())
                 || prefixo.longoDemais(parametros.prefixoMaximo())) {
-            return new ResultadoDaSugestao(
-                    ListaDeSugestoes.vazia(),
-                    rastroDeRecusa(consulta, prefixo, cliente, inicio));
+            var rastro = rastroDeRecusa(consulta, prefixo, cliente, inicio);
+            medidor.busca(rastro);
+            return new ResultadoDaSugestao(ListaDeSugestoes.vazia(), rastro);
         }
 
         // O executor fecha esperando as tarefas. Quem garante que isso não
@@ -104,13 +109,14 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
 
             // O segmento vem do token: a consulta ao índice arranca junto com a
             // leitura do perfil, não atrás dela.
-            Future<List<Candidato>> doIndice = executor.submit(() ->
+            Future<CatalogoDeSugestoes.Busca> doIndice = executor.submit(() ->
                     catalogo.candidatos(prefixo, cliente.contexto(), parametros.candidatosDoIndice()));
 
             Future<Perfil> doPerfil = executor.submit(() ->
                     perfis.porCliente(cliente.id()));
 
-            var indice = aguardar(doIndice, inicio, parametros.prazos().solr(), List::<Candidato>of);
+            var indice = aguardar(doIndice, inicio, parametros.prazos().solr(),
+                    CatalogoDeSugestoes.Busca::vazia);
             long msAteIndice = decorridoEmMs(inicio);
 
             var perfil = aguardar(doPerfil, inicio, parametros.prazos().perfil(), () -> Perfil.NEUTRO);
@@ -125,16 +131,17 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
             ConsultaDeSugestao consulta,
             Prefixo prefixo,
             Cliente cliente,
-            Colheita<List<Candidato>> indice,
+            Colheita<CatalogoDeSugestoes.Busca> indice,
             Colheita<Perfil> colhido,
             long inicio,
             long msAteIndice,
             long msAtePerfil) {
 
         Perfil perfil = colhido.valor();
+        List<Candidato> doIndice = indice.valor().candidatos();
 
         var classificados = classificador.classificar(
-                indice.valor(), perfil, parametros.cotas().evento());
+                doIndice, perfil, parametros.cotas().evento());
         int promovidos = (int) classificados.stream()
                 .filter(c -> c.origem() == Origem.EVENTO).count();
 
@@ -177,7 +184,8 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         var linhas = new ArrayList<RastroDaSugestao.Linha>(mistura.escolhidos().size());
         for (int i = 0; i < mistura.escolhidos().size(); i++) {
             var c = mistura.escolhidos().get(i);
-            linhas.add(new RastroDaSugestao.Linha(i, c.termo(), c.origem(), c.relevancia(), c.destino()));
+            linhas.add(new RastroDaSugestao.Linha(
+                    i, c.ofertaId(), c.termo(), c.origem(), c.relevancia(), c.destino()));
         }
 
         var rastro = new RastroDaSugestao(
@@ -189,12 +197,16 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
                 msAteIndice,
                 msAtePerfil,
                 decorridoEmMs(inicio),
-                indice.valor().size(),
+                doIndice.size(),
                 doHistorico.size(),
                 promovidos,
                 ranqueamento.jornadaLider(),
+                true,
+                indice.valor().tolerancia(),
                 descartes,
                 linhas);
+
+        medidor.busca(rastro);
 
         return new ResultadoDaSugestao(lista, rastro);
     }
@@ -216,7 +228,12 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
                 consulta.prefixoDigitado(), prefixo.valor(), cliente.id(), cliente.segmento(),
                 RastroDaSugestao.EstadoDoPerfil.SEM_PERFIL,
                 0, 0, decorridoEmMs(inicio),
-                0, 0, 0, "", List.of(), List.of());
+                0, 0, 0, "",
+                // prefixoAceito = false. É o que separa "não encontrou" de "nem
+                // era busca" na métrica de zero-resultado.
+                false,
+                ToleranciaAplicada.NAO_ELEGIVEL,
+                List.of(), List.of());
     }
 
     /**

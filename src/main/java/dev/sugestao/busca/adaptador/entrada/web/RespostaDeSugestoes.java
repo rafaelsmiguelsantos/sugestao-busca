@@ -98,6 +98,19 @@ public record RespostaDeSugestoes(
             String prefixoNormalizado,
             String perfil,
             String jornadaLider,
+
+            /**
+             * O que aconteceu com a tolerância a erro de digitação.
+             *
+             * <p>Entra na explicação porque sem isso a única evidência de que a
+             * segunda consulta existiu seria a latência — que é justamente o
+             * sinal que ninguém olha quando a resposta veio preenchida. E porque
+             * {@code ACIONADA_COM_GANHO} muda como se lê a lista: aquelas linhas
+             * não casaram com o que a pessoa digitou, casaram com o que ela
+             * provavelmente quis digitar.
+             */
+            String tolerancia,
+
             long msTotal,
             long msAteIndice,
             long msAtePerfil,
@@ -174,6 +187,7 @@ public record RespostaDeSugestoes(
                 rastro.prefixoNormalizado(),
                 rastro.perfil().name(),
                 rastro.jornadaLider(),
+                rastro.tolerancia().name(),
                 rastro.msTotal(),
                 rastro.msAteIndice(),
                 rastro.msAtePerfil(),

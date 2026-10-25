@@ -34,6 +34,26 @@ public record RastroDaSugestao(
         /** A jornada que o prefixo revelou, ou vazio quando nenhuma dominou. */
         String jornadaLider,
 
+        /**
+         * Se o prefixo chegou a ser consultado, ou foi recusado por tamanho
+         * antes de qualquer rede.
+         *
+         * <p>Existe para a medição poder separar <em>busca que não encontrou</em>
+         * de <em>texto que nem era busca</em>. As duas respondem lista vazia e
+         * são coisas opostas: a primeira é falha de cobertura e merece alarme; a
+         * segunda é alguém no meio da primeira letra. Misturadas num só
+         * contador, a taxa de zero-resultado fica dominada pelo segundo caso e
+         * para de significar qualquer coisa — e era justamente a métrica que ia
+         * dizer se a tolerância a erro de digitação funcionou.
+         */
+        boolean prefixoAceito,
+
+        /**
+         * Se a consulta tolerante a erro de digitação foi acionada, e o que ela
+         * trouxe. Ver {@link dev.sugestao.busca.aplicacao.ToleranciaAplicada}.
+         */
+        ToleranciaAplicada tolerancia,
+
         List<Descarte> descartes,
         List<Linha> linhas) {
 
@@ -48,20 +68,58 @@ public record RastroDaSugestao(
         FALHOU
     }
 
-    public record Linha(int posicao, String termo, Origem origem, double relevancia, String destino) {
+    /**
+     * O {@code ofertaId} entra aqui para a medição poder distinguir
+     * <em>encontrou algo</em> de <em>encontrou algo acionável</em>.
+     *
+     * <p>São perguntas diferentes e a segunda é a que o negócio faz. Uma busca
+     * que devolve três artigos de ajuda e nenhuma oferta não é zero-resultado,
+     * mas também não é sucesso — e foi exatamente o que apareceu em
+     * {@code q=financiamento}: uma linha de ação, nenhuma oferta, nenhum alarme
+     * possível com o que estava medido.
+     */
+    public record Linha(int posicao, String ofertaId, String termo, Origem origem,
+                        double relevancia, String destino) {
+
+        public Linha {
+            ofertaId = ofertaId == null ? "" : ofertaId;
+        }
+
+        public boolean ehOferta() {
+            return !ofertaId.isBlank();
+        }
     }
 
     public RastroDaSugestao {
         descartes = List.copyOf(descartes);
         linhas = List.copyOf(linhas);
+        tolerancia = tolerancia == null ? ToleranciaAplicada.NAO_PRECISOU : tolerancia;
     }
 
     /** Uma linha de log legível, para quando o rastro vai para o console. */
     public String resumo() {
-        return "q='%s' -> '%s' | cliente=%s/%s perfil=%s | indice=%d hist=%d evento=%d | jornada=%s | descartes=%d | linhas=%d | %dms (indice %dms, perfil %dms)"
+        return "q='%s' -> '%s' | cliente=%s/%s perfil=%s | indice=%d hist=%d evento=%d | jornada=%s | tolerancia=%s | descartes=%d | linhas=%d%s | %dms (indice %dms, perfil %dms)"
                 .formatted(prefixoDigitado, prefixoNormalizado, clienteId, segmento, perfil,
                         candidatosDoIndice, candidatosDoHistorico, promovidosAEvento,
                         jornadaLider.isBlank() ? "-" : jornadaLider,
-                        descartes.size(), linhas.size(), msTotal, msAteIndice, msAtePerfil);
+                        tolerancia,
+                        descartes.size(), linhas.size(), temOferta() ? " (com oferta)" : "",
+                        msTotal, msAteIndice, msAtePerfil);
+    }
+
+    /**
+     * A busca foi atendida e não encontrou nada.
+     *
+     * <p>Diferente de {@code linhas.isEmpty()}: prefixo recusado por tamanho
+     * também não tem linha nenhuma, e não é zero-resultado. Ver
+     * {@link #prefixoAceito}.
+     */
+    public boolean zeroResultado() {
+        return prefixoAceito && linhas.isEmpty();
+    }
+
+    /** Alguma linha entregue é oferta acionável. */
+    public boolean temOferta() {
+        return linhas.stream().anyMatch(Linha::ehOferta);
     }
 }

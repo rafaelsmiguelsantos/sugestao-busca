@@ -5,6 +5,7 @@ import dev.sugestao.busca.dominio.Jornada;
 import dev.sugestao.busca.dominio.Normalizacao;
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
 import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
+import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.DoubleUnaryOperator;
 
 /**
  * O lugar do job de agregação em janelas.
@@ -120,18 +122,22 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
 
     @Override
     public List<ComportamentoDoCliente> comportamentos(
-            Duration janelaDoHistorico, int tamanhoDoHistorico, PesosDeAfinidade pesos) {
+            Duration janelaDoHistorico, int tamanhoDoHistorico,
+            PesosDeAfinidade pesos, PesosDeFadiga fadiga) {
 
         Instant agora = Instant.now();
         Instant corteDoHistorico = agora.minus(janelaDoHistorico);
         Instant corteDaAfinidade = pesos.corte(agora);
+        Instant corteCurto = pesos.corteCurto(agora);
+        Instant corteLongo = pesos.corteLongo(agora);
+        Instant corteDaFadiga = fadiga.corte(agora);
 
-        // As duas janelas são diferentes e a varredura é uma só: a mais larga
-        // das duas é a da afinidade, então a iteração para nela e o histórico
-        // aplica o próprio corte dentro do laço.
-        Instant corteMaisLargo = corteDoHistorico.isBefore(corteDaAfinidade)
-                ? corteDoHistorico
-                : corteDaAfinidade;
+        // As janelas são várias e a varredura é uma só: a mais larga manda, e
+        // cada acumulador aplica o próprio corte dentro do laço. Varrer a fila
+        // uma vez por janela seria quatro passadas sobre dezenas de milhares de
+        // eventos a cada 15 segundos.
+        Instant corteMaisLargo = maisAntigo(
+                corteDoHistorico, corteDaAfinidade, corteLongo, corteDaFadiga);
 
         // LinkedHashSet para deduplicar mantendo a ordem, e a iteração é do
         // mais recente para o mais antigo: quem repete uma busca mantém a
@@ -141,7 +147,18 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         // Pontos BRUTOS, já descontada a idade de cada evento. Viram afinidade
         // entre 0 e 1 no fim, dividindo pelo piso de confiança — não pelo máximo
         // da própria pessoa, que era o que fazia um clique valer 1,0.
-        Map<String, Map<String, Double>> pontos = new HashMap<>();
+        Map<String, Map<String, Double>> pontosPorJornada = new HashMap<>();
+        Map<String, Map<String, Double>> pontosPorProduto = new HashMap<>();
+
+        // As duas janelas da tendência. Sem decaimento: a tendência é razão
+        // entre volumes de dois períodos, e aplicar meia-vida aqui contaria o
+        // tempo duas vezes — uma na janela, outra no decaimento — fazendo toda
+        // tendência parecer de alta.
+        Map<String, Map<String, Double>> pontosCurta = new HashMap<>();
+        Map<String, Map<String, Double>> pontosLonga = new HashMap<>();
+
+        // Impressões e cliques por (cliente, termo), para a fadiga.
+        Map<String, Map<String, int[]>> exposicoes = new HashMap<>();
 
         var reverso = eventos.descendingIterator();
         while (reverso.hasNext()) {
@@ -163,23 +180,41 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
                     }
                 }
 
-                case SUGESTAO_CLICADA -> somarPontos(
-                        pontos, evento, PESO_DO_CLIQUE, pesos, agora, corteDaAfinidade);
+                case SUGESTAO_EXIBIDA -> {
+                    if (!evento.ocorridoEm().isBefore(corteDaFadiga)) {
+                        for (String exibido : evento.termosExibidos()) {
+                            contador(exposicoes, evento.clienteId(), exibido)[0]++;
+                        }
+                    }
+                }
 
-                case ADESAO -> somarPontos(
-                        pontos, evento, PESO_DA_ADESAO, pesos, agora, corteDaAfinidade);
+                case SUGESTAO_CLICADA -> {
+                    somar(pontosPorJornada, pontosPorProduto, pontosCurta, pontosLonga,
+                            evento, PESO_DO_CLIQUE, pesos, agora,
+                            corteDaAfinidade, corteCurto, corteLongo);
+
+                    if (!evento.ocorridoEm().isBefore(corteDaFadiga)) {
+                        contador(exposicoes, evento.clienteId(), evento.termo())[1]++;
+                    }
+                }
+
+                case ADESAO -> somar(pontosPorJornada, pontosPorProduto, pontosCurta, pontosLonga,
+                        evento, PESO_DA_ADESAO, pesos, agora,
+                        corteDaAfinidade, corteCurto, corteLongo);
 
                 default -> { }
             }
         }
 
         var clientes = new LinkedHashSet<String>(historicos.keySet());
-        clientes.addAll(pontos.keySet());
+        clientes.addAll(pontosPorJornada.keySet());
+        clientes.addAll(exposicoes.keySet());
 
         var resultado = new ArrayList<ComportamentoDoCliente>(clientes.size());
         for (String cliente : clientes) {
             var termos = historicos.getOrDefault(cliente, new LinkedHashSet<>());
-            resultado.add(new ComportamentoDoCliente(
+
+            var comportamento = new ComportamentoDoCliente(
                     cliente,
                     termos.stream().limit(tamanhoDoHistorico).toList(),
                     // Gatilho não nasce de busca. Pix recusado, fatura alta e
@@ -187,25 +222,84 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
                     // modela — por isso esta lista sai vazia e o escritor de
                     // perfil preserva os gatilhos que já existiam.
                     Set.of(),
-                    comoAfinidade(pontos.get(cliente), pesos)));
+                    comoAfinidade(pontosPorJornada.get(cliente), pesos::afinidadeDe),
+                    comoAfinidade(pontosPorProduto.get(cliente), pesos::afinidadeDeProduto),
+                    comoTendencia(pontosCurta.get(cliente), pontosLonga.get(cliente), pesos),
+                    comoFadiga(exposicoes.get(cliente), fadiga));
+
+            // Comportamento sem nada a dizer não é devolvido, e isto não é
+            // economia: é correção de um efeito que a fadiga introduziu.
+            //
+            // O conjunto de clientes é semeado também por `exposicoes`, que
+            // precisa dos CLIQUES para poder zerar a fadiga de um termo. O efeito
+            // colateral é que um cliente cujos cliques foram todos em linha sem
+            // jornada — histórico e do log, que não geram afinidade — passava a
+            // aparecer aqui com as quatro dimensões vazias. O escritor de perfil
+            // criaria um perfil para ele com `conhecido = true`, e a lista dessa
+            // pessoa deixaria de ser marcada como degradada sem que uma única
+            // informação sobre ela tivesse sido aprendida.
+            //
+            // Degradada é o que ela é: não há perfil, só um clique que não
+            // ensinou nada.
+            if (temAlgoADizer(comportamento)) {
+                resultado.add(comportamento);
+            }
         }
         return resultado;
     }
 
+    private static boolean temAlgoADizer(ComportamentoDoCliente c) {
+        return !c.historico().isEmpty()
+                || !c.afinidadePorJornada().isEmpty()
+                || !c.afinidadePorProduto().isEmpty()
+                || !c.tendenciaPorJornada().isEmpty()
+                || !c.fadigaPorTermo().isEmpty();
+    }
+
+    private static Instant maisAntigo(Instant... cortes) {
+        Instant menor = cortes[0];
+        for (Instant corte : cortes) {
+            if (corte.isBefore(menor)) {
+                menor = corte;
+            }
+        }
+        return menor;
+    }
+
     /**
-     * Pontos brutos por jornada, cada evento valendo menos conforme envelhece.
+     * {@code [0]} impressões, {@code [1]} cliques.
+     *
+     * <p>Um {@code int[2]} e não um record por decisão de alocação: este mapa
+     * cresce com (clientes × termos exibidos) e é reconstruído inteiro a cada 15
+     * segundos. Um objeto por par custaria caro exatamente no laço mais quente do
+     * caminho de escrita, e o array é mutável no lugar.
      */
-    private static void somarPontos(
-            Map<String, Map<String, Double>> pontos,
+    private static int[] contador(
+            Map<String, Map<String, int[]>> mapa, String cliente, String termo) {
+        return mapa.computeIfAbsent(cliente, c -> new HashMap<>())
+                .computeIfAbsent(Normalizacao.aplicar(termo), t -> new int[2]);
+    }
+
+    /**
+     * Pontos brutos por jornada e por produto, mais as duas janelas da
+     * tendência, num evento só.
+     *
+     * <p>Quatro mapas numa chamada porque é a mesma leitura do mesmo evento:
+     * separar em quatro métodos custaria quatro normalizações do mesmo texto e
+     * quatro buscas no mesmo mapa, no laço mais quente do caminho de escrita.
+     */
+    private static void somar(
+            Map<String, Map<String, Double>> porJornada,
+            Map<String, Map<String, Double>> porProduto,
+            Map<String, Map<String, Double>> curta,
+            Map<String, Map<String, Double>> longa,
             EventoDeBusca evento,
             double pesoBase,
             PesosDeAfinidade pesos,
             Instant agora,
-            Instant corteDaAfinidade) {
-
-        if (evento.ocorridoEm().isBefore(corteDaAfinidade)) {
-            return;
-        }
+            Instant corteDaAfinidade,
+            Instant corteCurto,
+            Instant corteLongo) {
 
         // Normaliza pela mesma função que normaliza a jornada no cadastro de
         // oferta. Sem isto, um app que manda "Crédito" cria um balde que nunca
@@ -213,7 +307,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         // contada, guardada, e não produz impulso nenhum. Falha silenciosa, do
         // tipo que se descobre meses depois perguntando por que o ranking por
         // comportamento não mexe em nada.
-        String chave = Normalizacao.aplicar(evento.jornada());
+        String jornada = Normalizacao.aplicar(evento.jornada());
 
         // E o sentinela de "sem jornada" não acumula.
         //
@@ -224,14 +318,41 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         // balde: três cliques em linha de histórico davam afinidade 1,0 com
         // `busca`, e aí TODA linha vinda do log passava a ser promovida. O sinal
         // mais fraco do conjunto virava o mais forte, pela porta de trás.
-        if (Jornada.ausente(chave)) {
+        if (Jornada.ausente(jornada)) {
             return;
         }
 
-        double peso = pesos.pesoComIdade(pesoBase, evento.ocorridoEm(), agora);
+        if (!evento.ocorridoEm().isBefore(corteDaAfinidade)) {
+            double peso = pesos.pesoComIdade(pesoBase, evento.ocorridoEm(), agora);
 
-        pontos.computeIfAbsent(evento.clienteId(), c -> new HashMap<>())
-                .merge(chave, peso, Double::sum);
+            acumular(porJornada, evento.clienteId(), jornada, peso);
+
+            // O produto pode vir vazio: linha popular e linha de histórico não
+            // têm produto. Nesse caso só o nível da jornada é contado — não um
+            // balde de produto vazio, que seria o mesmo erro que `busca` era na
+            // jornada.
+            String produto = evento.produto();
+            if (produto != null && !produto.isBlank()) {
+                acumular(porProduto, evento.clienteId(), produto.strip(), peso);
+            }
+        }
+
+        // As janelas da tendência contam o peso BASE, sem decaimento. Aplicar
+        // meia-vida aqui contaria o tempo duas vezes — a janela já é um corte
+        // temporal — e o efeito seria sistemático: a janela curta sofreria menos
+        // decaimento que a longa, e toda tendência pareceria de alta.
+        if (!evento.ocorridoEm().isBefore(corteLongo)) {
+            acumular(longa, evento.clienteId(), jornada, pesoBase);
+
+            if (!evento.ocorridoEm().isBefore(corteCurto)) {
+                acumular(curta, evento.clienteId(), jornada, pesoBase);
+            }
+        }
+    }
+
+    private static void acumular(
+            Map<String, Map<String, Double>> mapa, String cliente, String chave, double valor) {
+        mapa.computeIfAbsent(cliente, c -> new HashMap<>()).merge(chave, valor, Double::sum);
     }
 
     /**
@@ -250,25 +371,89 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
      * nenhum dos dois é comparado com a população. O que muda é que pouca
      * evidência passa a valer pouco — que é o que pouca evidência é.
      *
-     * <p>Jornada abaixo de um milésimo é descartada. São os eventos tão velhos
+     * <p>Chave abaixo de um milésimo é descartada. São os eventos tão velhos
      * que o decaimento já os tornou irrelevantes, e mantê-los no mapa só gasta
      * espaço no perfil e tempo na comparação.
+     *
+     * <p>Recebe a normalização como função para servir aos dois níveis: a
+     * jornada divide pelo piso de 6,0 e o produto pelo de 4,0, e o resto da
+     * conta é idêntico.
      */
     private static Map<String, Double> comoAfinidade(
-            Map<String, Double> pontos, PesosDeAfinidade pesos) {
+            Map<String, Double> pontos, DoubleUnaryOperator normalizacao) {
 
         if (pontos == null || pontos.isEmpty()) {
             return Map.of();
         }
 
         var afinidades = new HashMap<String, Double>(pontos.size());
-        pontos.forEach((jornada, total) -> {
-            double afinidade = pesos.afinidadeDe(total);
+        pontos.forEach((chave, total) -> {
+            double afinidade = normalizacao.applyAsDouble(total);
             if (afinidade >= 0.001) {
-                afinidades.put(jornada, afinidade);
+                afinidades.put(chave, afinidade);
             }
         });
         return Map.copyOf(afinidades);
+    }
+
+    /**
+     * A tendência por jornada, só onde há evidência para ela.
+     *
+     * <p>Itera pela janela <strong>longa</strong>, que é o denominador: uma
+     * jornada que só aparece na curta não existiria na longa, o que é impossível
+     * porque a curta está contida na longa. Iterar pela curta deixaria de fora
+     * justamente as jornadas que esfriaram — que são as que a tendência tem algo
+     * a dizer sobre.
+     *
+     * <p>E só guarda o que difere de 1,0. O neutro é o padrão do lado que lê, em
+     * {@code Perfil.tendenciaCom}, então gravar 1,0 explicitamente encheria o
+     * perfil de entradas que não mudam nada — e o perfil é lido a cada tecla.
+     */
+    private static Map<String, Double> comoTendencia(
+            Map<String, Double> curta, Map<String, Double> longa, PesosDeAfinidade pesos) {
+
+        if (longa == null || longa.isEmpty()) {
+            return Map.of();
+        }
+
+        var tendencias = new HashMap<String, Double>(longa.size());
+        longa.forEach((jornada, totalLongo) -> {
+            double totalCurto = curta == null ? 0.0 : curta.getOrDefault(jornada, 0.0);
+            double tendencia = pesos.tendenciaDe(totalCurto, totalLongo);
+
+            if (Math.abs(tendencia - 1.0) >= 0.01) {
+                tendencias.put(jornada, tendencia);
+            }
+        });
+        return Map.copyOf(tendencias);
+    }
+
+    /**
+     * A fadiga por termo: impressões sem clique, acima do piso de evidência.
+     *
+     * <p>Só guarda o que é maior que zero, que é a minoria dos termos — a maioria
+     * foi exibida poucas vezes ou foi clicada. Gravar zero para todos os termos
+     * já exibidos faria o perfil crescer com o vocabulário em vez de com o
+     * comportamento.
+     */
+    private static Map<String, Double> comoFadiga(
+            Map<String, int[]> exposicoes, PesosDeFadiga pesos) {
+
+        if (exposicoes == null || exposicoes.isEmpty()) {
+            return Map.of();
+        }
+
+        var fadigas = new HashMap<String, Double>();
+        exposicoes.forEach((termo, contagem) -> {
+            if (termo.isBlank()) {
+                return;
+            }
+            double fadiga = pesos.fadigaDe(contagem[0], contagem[1]);
+            if (fadiga > 0) {
+                fadigas.put(termo, fadiga);
+            }
+        });
+        return Map.copyOf(fadigas);
     }
 
     @Override

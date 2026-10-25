@@ -43,6 +43,26 @@
           { "class": "solr.ASCIIFoldingFilterFactory" }
         ]
       }
+    },
+    {
+      "name": "palavra_inteira",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "omitNorms": true,
+      "indexAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" }
+        ]
+      },
+      "queryAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" }
+        ]
+      }
     }
   ],
 
@@ -51,6 +71,8 @@
     { "name": "termo_prefixo",  "type": "prefixo_frase",   "indexed": true,  "stored": false },
     { "name": "termo_infixo",   "type": "prefixo_palavra", "indexed": true,  "stored": false, "multiValued": true },
     { "name": "sinonimo",       "type": "prefixo_palavra", "indexed": true,  "stored": true,  "multiValued": true },
+
+    { "name": "termo_tolerante", "type": "palavra_inteira", "indexed": true, "stored": false, "multiValued": true },
 
     { "name": "tipo",           "type": "string",  "indexed": true,  "stored": true },
     { "name": "jornada_s",      "type": "string",  "indexed": true,  "stored": true },
@@ -79,7 +101,7 @@
   ],
 
   "add-copy-field": [
-    { "source": "termo",    "dest": ["termo_prefixo", "termo_infixo"] },
-    { "source": "sinonimo", "dest": ["termo_infixo"] }
+    { "source": "termo",    "dest": ["termo_prefixo", "termo_infixo", "termo_tolerante"] },
+    { "source": "sinonimo", "dest": ["termo_infixo", "termo_tolerante"] }
   ]
 }

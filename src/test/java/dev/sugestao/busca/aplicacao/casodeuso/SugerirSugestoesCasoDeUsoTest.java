@@ -5,6 +5,7 @@ import dev.sugestao.busca.aplicacao.Prazos;
 import dev.sugestao.busca.aplicacao.RastroDaSugestao;
 import dev.sugestao.busca.aplicacao.porta.entrada.ConsultaDeSugestao;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
+import dev.sugestao.busca.aplicacao.porta.saida.MedidorDeBusca;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDePerfil;
 import dev.sugestao.busca.dominio.Candidato;
 import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
@@ -69,7 +70,7 @@ class SugerirSugestoesCasoDeUsoTest {
         var caso = montar(
                 (prefixo, segmento, limite) -> {
                     indiceTocado.set(true);
-                    return List.of();
+                    return CatalogoDeSugestoes.Busca.exata(List.of());
                 },
                 id -> {
                     perfilTocado.set(true);
@@ -87,7 +88,7 @@ class SugerirSugestoesCasoDeUsoTest {
     @DisplayName("perfil que estoura o prazo vira lista popular, marcada como degradada")
     void perfilLentoFalhaAberta() {
         var caso = montar(
-                (prefixo, segmento, limite) -> List.of(popular("pagar boleto")),
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(popular("pagar boleto"))),
                 id -> {
                     dormir(200);
                     return new Perfil(List.of("pix agendado"), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true);
@@ -109,7 +110,7 @@ class SugerirSugestoesCasoDeUsoTest {
         var caso = montar(
                 (prefixo, segmento, limite) -> {
                     dormir(120);
-                    return List.of(popular("pagar boleto"));
+                    return CatalogoDeSugestoes.Busca.exata(List.of(popular("pagar boleto")));
                 },
                 id -> new Perfil(List.of("pagar pix"), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true),
                 PARAMETROS_COM_PERFIL_APERTADO);
@@ -143,7 +144,7 @@ class SugerirSugestoesCasoDeUsoTest {
                 "/app/credito/antecipacao", "credito", "ANTECIPACAO", Restricoes.NENHUMA, List.of("pix_recusado_72h"), 5000, 1.0, Origem.CATALOGO);
 
         var caso = montar(
-                (prefixo, segmento, limite) -> List.of(popular("antecipar agora"), comGatilho),
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(popular("antecipar agora"), comGatilho)),
                 id -> new Perfil(List.of(), Set.of("pix_recusado_72h"), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true));
 
         var lista = caso.executar(new ConsultaDeSugestao("ante", CLIENTE)).lista();
@@ -161,7 +162,7 @@ class SugerirSugestoesCasoDeUsoTest {
         var caso = montar(
                 (prefixo, segmento, limite) -> {
                     recebido.set(prefixo.valor());
-                    return List.of();
+                    return CatalogoDeSugestoes.Busca.exata(List.of());
                 },
                 id -> Perfil.NEUTRO);
 
@@ -178,7 +179,7 @@ class SugerirSugestoesCasoDeUsoTest {
         var abaixoDoPiso = new Candidato("pagar boleto do joao", "", "/busca", "busca", "", Restricoes.NENHUMA, List.of(), 4, 1.0, Origem.POPULAR);
 
         var caso = montar(
-                (prefixo, segmento, limite) -> List.of(exigeElegibilidade, abaixoDoPiso, popular("pagar boleto")),
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(exigeElegibilidade, abaixoDoPiso, popular("pagar boleto"))),
                 id -> new Perfil(List.of(), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true));
 
         var rastro = caso.executar(new ConsultaDeSugestao("pa", CLIENTE)).rastro();
@@ -206,11 +207,11 @@ class SugerirSugestoesCasoDeUsoTest {
     @DisplayName("o rastro distingue perfil inexistente de perfil que estourou o prazo")
     void rastroDistingueAsDegradacoes() {
         var semPerfil = montar(
-                (prefixo, segmento, limite) -> List.of(popular("pagar boleto")),
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(popular("pagar boleto"))),
                 id -> Perfil.NEUTRO);
 
         var lento = montar(
-                (prefixo, segmento, limite) -> List.of(popular("pagar boleto")),
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(popular("pagar boleto"))),
                 id -> {
                     dormir(200);
                     return new Perfil(List.of(), Set.of(), Set.of(), Set.of(), SituacaoDaConta.ATIVA, true);
@@ -234,7 +235,7 @@ class SugerirSugestoesCasoDeUsoTest {
             CatalogoDeSugestoes catalogo, RepositorioDePerfil perfis, ParametrosDeSugestao parametros) {
         return new SugerirSugestoesCasoDeUso(
                 catalogo, perfis, new ClassificadorDeOrigem(), new Peneira(30),
-                new Rankeador(), new Misturador(), parametros);
+                new Rankeador(), new Misturador(), parametros, MedidorDeBusca.NULO);
     }
 
     private static Candidato popular(String termo) {

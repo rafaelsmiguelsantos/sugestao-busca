@@ -3,6 +3,7 @@ package dev.sugestao.busca.aplicacao.casodeuso;
 import dev.sugestao.busca.aplicacao.porta.entrada.RegistrarEventos;
 import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDaIngestao;
 import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
+import dev.sugestao.busca.aplicacao.porta.saida.MedidorDeBusca;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 import dev.sugestao.busca.dominio.evento.Saneador;
 import dev.sugestao.busca.dominio.evento.Saneamento;
@@ -29,10 +30,13 @@ public class RegistrarEventosCasoDeUso implements RegistrarEventos {
 
     private final FilaDeEventos fila;
     private final Saneador saneador;
+    private final MedidorDeBusca medidor;
 
-    public RegistrarEventosCasoDeUso(FilaDeEventos fila, Saneador saneador) {
+    public RegistrarEventosCasoDeUso(FilaDeEventos fila, Saneador saneador,
+                                     MedidorDeBusca medidor) {
         this.fila = fila;
         this.saneador = saneador;
+        this.medidor = medidor == null ? MedidorDeBusca.NULO : medidor;
     }
 
     @Override
@@ -51,10 +55,35 @@ public class RegistrarEventosCasoDeUso implements RegistrarEventos {
 
         if (!aceitos.isEmpty()) {
             fila.publicar(aceitos);
+            medir(aceitos);
         }
 
         int descartados = eventos.size() - aceitos.size();
         return new ResultadoDaIngestao(aceitos.size(), descartados, Map.copyOf(motivos));
+    }
+
+    /**
+     * Mede só o que foi <strong>aceito</strong>.
+     *
+     * <p>Medir antes do saneamento contaria clique em termo com CPF como clique
+     * válido, e aí a distribuição de posição clicada — que é a métrica que diz se
+     * o ranking acerta — incluiria eventos que o resto do sistema recusou. Dois
+     * números para a mesma coisa, discordando, e o de observabilidade sendo o
+     * errado.
+     *
+     * <p>E depois de publicar na fila, não antes: a fila é o que o negócio
+     * reconhece como "o evento entrou". Se a publicação falhar, a exceção sobe e
+     * nada foi medido — o contador não fica à frente do dado.
+     */
+    private void medir(List<EventoDeBusca> aceitos) {
+        for (EventoDeBusca evento : aceitos) {
+            switch (evento.tipo()) {
+                case SUGESTAO_CLICADA -> medidor.cliqueEm(evento.posicao());
+                case SUGESTAO_EXIBIDA -> medidor.impressao(
+                        evento.termosExibidos().size(), evento.listaDegradada());
+                default -> { }
+            }
+        }
     }
 
     /** {@code null} quando o evento pode seguir. */

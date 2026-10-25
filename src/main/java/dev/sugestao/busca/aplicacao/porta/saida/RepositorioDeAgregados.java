@@ -2,6 +2,7 @@ package dev.sugestao.busca.aplicacao.porta.saida;
 
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
 import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
+import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 
@@ -27,15 +28,23 @@ public interface RepositorioDeAgregados {
     /**
      * Comportamento por cliente.
      *
-     * <p>Duas janelas, porque histórico e afinidade medem coisas diferentes. O
-     * histórico é "o que você digitou ultimamente" e é curto — lista de
-     * conveniência. A afinidade é "em que você demonstrou interesse" e é longa
-     * com meia-vida curta: interesse em crédito imobiliário não se demonstra
-     * todo dia, e cortar em 24 h chamaria de desinteresse o que é só intervalo
-     * entre acessos.
+     * <p>Várias janelas, porque os sinais medem coisas diferentes. O
+     * <strong>histórico</strong> é "o que você digitou ultimamente" e é curto —
+     * lista de conveniência. A <strong>afinidade</strong> é "em que você
+     * demonstrou interesse" e é longa com meia-vida curta: interesse em crédito
+     * imobiliário não se demonstra todo dia, e cortar em 24 h chamaria de
+     * desinteresse o que é só intervalo entre acessos. A <strong>tendência</strong>
+     * tem duas janelas próprias, porque ela é uma razão entre períodos. E a
+     * <strong>fadiga</strong> tem a sua, mais curta, porque ignorar uma oferta em
+     * março não deve pesar em outubro.
+     *
+     * <p>São dois objetos de peso e não cinco durações soltas: os números que
+     * governam cada sinal viajam junto com a regra que os usa, e o compilador
+     * impede passar a meia-vida da afinidade no lugar da janela da fadiga.
      */
     List<ComportamentoDoCliente> comportamentos(
-            Duration janelaDoHistorico, int tamanhoDoHistorico, PesosDeAfinidade pesos);
+            Duration janelaDoHistorico, int tamanhoDoHistorico,
+            PesosDeAfinidade pesos, PesosDeFadiga fadiga);
 
     int eventosRetidos();
 }

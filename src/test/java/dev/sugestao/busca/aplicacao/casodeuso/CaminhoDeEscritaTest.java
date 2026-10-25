@@ -37,7 +37,8 @@ class CaminhoDeEscritaTest {
     private final EscritorFalso perfis = new EscritorFalso();
 
     private final RegistrarEventosCasoDeUso ingestao =
-            new RegistrarEventosCasoDeUso(fila, new Saneador());
+            new RegistrarEventosCasoDeUso(fila, new Saneador(),
+                    dev.sugestao.busca.aplicacao.porta.saida.MedidorDeBusca.NULO);
 
     /** Régua mínima: só o que a classificação de jornada precisa enxergar. */
     private final CatalogoCurado catalogo = () -> List.of(

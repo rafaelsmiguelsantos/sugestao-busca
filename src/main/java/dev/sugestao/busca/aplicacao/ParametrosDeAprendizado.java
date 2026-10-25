@@ -1,6 +1,7 @@
 package dev.sugestao.busca.aplicacao;
 
 import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
+import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
 
 import java.time.Duration;
 
@@ -28,7 +29,15 @@ public record ParametrosDeAprendizado(
          * governa a AFINIDADE, que mede interesse demonstrado e por isso e longa
          * com meia-vida curta. Ver PesosDeAfinidade.
          */
-        PesosDeAfinidade afinidade) {
+        PesosDeAfinidade afinidade,
+
+        /*
+         * O sinal negativo. Separado da afinidade porque faz o oposto dela: a
+         * afinidade promove com base no que a pessoa escolheu, a fadiga rebaixa
+         * com base no que ela ignorou. Juntar os dois num record so faria oito
+         * numeros com nome parecido e significado oposto. Ver PesosDeFadiga.
+         */
+        PesosDeFadiga fadiga) {
 
     public ParametrosDeAprendizado {
         if (kAnonimatoMinimo < 1) {
@@ -36,9 +45,10 @@ public record ParametrosDeAprendizado(
                     "o piso de k-anonimato precisa ser ao menos 1; zero publica o dado de uma pessoa só");
         }
         afinidade = afinidade == null ? PesosDeAfinidade.padrao() : afinidade;
+        fadiga = fadiga == null ? PesosDeFadiga.padrao() : fadiga;
     }
 
-    /** Sem pesos de afinidade declarados, usa os padrão. Conveniência para teste. */
+    /** Sem pesos declarados, usa os padrão. Conveniência para teste. */
     public ParametrosDeAprendizado(
             Duration janelaDoVocabulario,
             Duration janelaDoComportamento,
@@ -47,12 +57,13 @@ public record ParametrosDeAprendizado(
             int kAnonimatoMinimo) {
 
         this(janelaDoVocabulario, janelaDoComportamento, tamanhoDoHistorico,
-                loteDeConsumo, kAnonimatoMinimo, PesosDeAfinidade.padrao());
+                loteDeConsumo, kAnonimatoMinimo,
+                PesosDeAfinidade.padrao(), PesosDeFadiga.padrao());
     }
 
     public static ParametrosDeAprendizado padrao(int kAnonimatoMinimo) {
         return new ParametrosDeAprendizado(
                 Duration.ofDays(30), Duration.ofHours(24), 20, 5000, kAnonimatoMinimo,
-                PesosDeAfinidade.padrao());
+                PesosDeAfinidade.padrao(), PesosDeFadiga.padrao());
     }
 }

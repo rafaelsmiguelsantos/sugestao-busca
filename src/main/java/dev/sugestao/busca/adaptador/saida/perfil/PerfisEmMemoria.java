@@ -99,6 +99,32 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
                 // esfriava nunca. Com o decaimento no lugar certo, sobrescrever
                 // volta a ser o certo — porque agora o vazio quer dizer algo.
                 novo.afinidadePorJornada(),
+
+                // Mesma regra, mesmo motivo: o decaimento mora no cálculo.
+                novo.afinidadePorProduto(),
+
+                // A tendência também sobrescreve, e aqui o vazio tem um
+                // significado a mais: "não há evidência suficiente para dizer
+                // para onde isto vai". O lado que lê trata ausência como 1,0 —
+                // neutro —, então apagar a tendência devolve a pessoa ao
+                // tratamento padrão, que é o certo quando a evidência acabou.
+                novo.tendenciaPorJornada(),
+
+                // A fadiga sobrescreve, e esta é a única das quatro em que
+                // perder o valor é a direção SEGURA.
+                //
+                // As outras três promovem: perdê-las piora a lista de quem tinha
+                // preferência demonstrada. A fadiga rebaixa: perdê-la devolve ao
+                // cliente linhas que ele vinha ignorando. O primeiro é dano ao
+                // cliente, o segundo é dano à precisão — e entre os dois, esta é
+                // a falha que se prefere.
+                //
+                // Importa porque a fila de eventos tem teto: quando ela gira, os
+                // eventos de impressão mais antigos saem e a fadiga calculada
+                // encolhe. Com sobrescrita, a pessoa simplesmente volta a ver o
+                // que ignorava, em vez de carregar para sempre uma penalidade
+                // cujo motivo não existe mais em lugar nenhum.
+                novo.fadigaPorTermo(),
                 true);
     }
 
@@ -113,6 +139,9 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
                 // condicionada não aparece até alguém que saiba dizer.
                 SituacaoDaConta.DESCONHECIDA,
                 comportamento.afinidadePorJornada(),
+                comportamento.afinidadePorProduto(),
+                comportamento.tendenciaPorJornada(),
+                comportamento.fadigaPorTermo(),
                 true);
     }
 }

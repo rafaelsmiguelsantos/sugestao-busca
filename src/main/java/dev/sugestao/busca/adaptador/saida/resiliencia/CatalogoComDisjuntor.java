@@ -1,11 +1,8 @@
 package dev.sugestao.busca.adaptador.saida.resiliencia;
 
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
-import dev.sugestao.busca.dominio.Candidato;
 import dev.sugestao.busca.dominio.ContextoDeBusca;
 import dev.sugestao.busca.dominio.Prefixo;
-
-import java.util.List;
 
 /**
  * O disjuntor na frente do catálogo, como decorador da porta.
@@ -67,8 +64,18 @@ public class CatalogoComDisjuntor implements CatalogoDeSugestoes {
         this.disjuntor = disjuntor;
     }
 
+    /**
+     * A tolerância a erro de digitação fica <strong>dentro</strong> do que o
+     * disjuntor protege, e não ao lado.
+     *
+     * <p>Consequência que vale dizer em voz alta: quando o Solr está ruim, a
+     * segunda consulta não é tentada — ela está dentro da mesma chamada que o
+     * disjuntor recusa. É o comportamento certo. A tolerância existe para
+     * recuperar busca que falhou por erro de digitação, não para dobrar a carga
+     * sobre um índice que já está entregando erro.
+     */
     @Override
-    public List<Candidato> candidatos(Prefixo prefixo, ContextoDeBusca contexto, int limite) {
+    public Busca candidatos(Prefixo prefixo, ContextoDeBusca contexto, int limite) {
         return disjuntor.executar(() -> delegado.candidatos(prefixo, contexto, limite));
     }
 

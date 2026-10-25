@@ -9,6 +9,7 @@ import dev.sugestao.busca.adaptador.saida.perfil.PerfisEmMemoria;
 import dev.sugestao.busca.adaptador.saida.resiliencia.CatalogoComDisjuntor;
 import dev.sugestao.busca.adaptador.saida.resiliencia.Disjuntor;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoCuradoSolr;
+import dev.sugestao.busca.adaptador.saida.metrica.MedidorMicrometer;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.ConsultaDeCandidatos;
 import dev.sugestao.busca.adaptador.saida.solr.PublicadorSolr;
@@ -26,6 +27,9 @@ import dev.sugestao.busca.aplicacao.porta.entrada.RegistrarEventos;
 import dev.sugestao.busca.aplicacao.porta.entrada.SugerirSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoCurado;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
+import dev.sugestao.busca.aplicacao.porta.saida.MedidorDeBusca;
+import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
+import io.micrometer.core.instrument.MeterRegistry;
 import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
 import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
 import dev.sugestao.busca.aplicacao.porta.saida.PublicadorDeVocabulario;
@@ -131,7 +135,12 @@ public class ConfiguracaoDeSugestao {
             SugestaoProperties props,
             ConsultaDeCandidatos consulta) {
 
-        var catalogo = new CatalogoSolr(solr, props.solr().colecao(), consulta);
+        var busca = props.busca() == null
+                ? SugestaoProperties.Busca.padrao()
+                : props.busca();
+
+        var catalogo = new CatalogoSolr(
+                solr, props.solr().colecao(), consulta, busca.toleranciaHabilitada());
 
         var config = props.disjuntor() == null
                 ? SugestaoProperties.Disjuntor.padrao()
@@ -190,8 +199,26 @@ public class ConfiguracaoDeSugestao {
                 props.candidatosSolr(),
                 new Cotas(props.cota().historico(), props.cota().evento(), props.resultadoMaximo()),
                 new PesosDeRanking(p.jornadaLider(), p.produtoDaJornada(),
-                        p.afinidadeMaxima(), p.margemParaLiderar()),
+                        p.afinidadeMaxima(), p.afinidadeDeProdutoMaxima(),
+                        p.tendenciaMaxima(), p.fatorMaximo(), p.fadigaMinima(),
+                        p.margemParaLiderar()),
                 Prazos.de(props.prazo().solrMs(), props.prazo().perfilMs(), props.prazo().totalMs()));
+    }
+
+    /**
+     * O medidor, ou o nulo quando a medição está desligada.
+     *
+     * <p>Mesmo padrão do disjuntor: desligar é não empilhar o adaptador, e o
+     * {@code NULO} entra no lugar dele. O {@code MeterRegistry} vem do Actuator,
+     * que já era dependência por causa do {@code /actuator/health}.
+     */
+    @Bean
+    public MedidorDeBusca medidorDeBusca(SugestaoProperties props, MeterRegistry registro) {
+        var medicao = props.medicao() == null
+                ? SugestaoProperties.Medicao.padrao()
+                : props.medicao();
+
+        return medicao.habilitada() ? new MedidorMicrometer(registro) : MedidorDeBusca.NULO;
     }
 
     @Bean
@@ -202,10 +229,11 @@ public class ConfiguracaoDeSugestao {
             Peneira peneira,
             Rankeador rankeador,
             Misturador misturador,
-            ParametrosDeSugestao parametros) {
+            ParametrosDeSugestao parametros,
+            MedidorDeBusca medidor) {
 
-        return new SugerirSugestoesCasoDeUso(
-                catalogo, perfis, classificador, peneira, rankeador, misturador, parametros);
+        return new SugerirSugestoesCasoDeUso(catalogo, perfis, classificador, peneira,
+                rankeador, misturador, parametros, medidor);
     }
 
     // -----------------------------------------------------------------------
@@ -260,6 +288,10 @@ public class ConfiguracaoDeSugestao {
                 ? SugestaoProperties.Afinidade.padrao()
                 : a.afinidade();
 
+        var fadiga = a.fadiga() == null
+                ? SugestaoProperties.Fadiga.padrao()
+                : a.fadiga();
+
         return new ParametrosDeAprendizado(
                 Duration.ofDays(a.janelaVocabularioDias()),
                 Duration.ofHours(a.janelaComportamentoHoras()),
@@ -269,12 +301,21 @@ public class ConfiguracaoDeSugestao {
                 new PesosDeAfinidade(
                         Duration.ofDays(afinidade.janelaDias()),
                         Duration.ofDays(afinidade.meiaVidaDias()),
-                        afinidade.pisoDeConfianca()));
+                        afinidade.pisoDeConfianca(),
+                        afinidade.pisoDeConfiancaDoProduto(),
+                        Duration.ofDays(afinidade.tendenciaCurtaDias()),
+                        Duration.ofDays(afinidade.tendenciaLongaDias()),
+                        afinidade.pisoDaTendencia()),
+                new PesosDeFadiga(
+                        fadiga.impressoesMinimas(),
+                        fadiga.impressoesParaOTeto(),
+                        Duration.ofDays(fadiga.janelaDias())));
     }
 
     @Bean
-    public RegistrarEventos registrarEventos(FilaDeEventos fila, Saneador saneador) {
-        return new RegistrarEventosCasoDeUso(fila, saneador);
+    public RegistrarEventos registrarEventos(FilaDeEventos fila, Saneador saneador,
+                                             MedidorDeBusca medidor) {
+        return new RegistrarEventosCasoDeUso(fila, saneador, medidor);
     }
 
     @Bean

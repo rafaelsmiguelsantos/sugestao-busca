@@ -1,0 +1,33 @@
+{
+  "add-field-type": [
+    {
+      "name": "palavra_inteira",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "omitNorms": true,
+      "indexAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" }
+        ]
+      },
+      "queryAnalyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ASCIIFoldingFilterFactory" }
+        ]
+      }
+    }
+  ],
+
+  "add-field": [
+    { "name": "termo_tolerante", "type": "palavra_inteira", "indexed": true, "stored": false, "multiValued": true }
+  ],
+
+  "add-copy-field": [
+    { "source": "termo",    "dest": ["termo_tolerante"] },
+    { "source": "sinonimo", "dest": ["termo_tolerante"] }
+  ]
+}

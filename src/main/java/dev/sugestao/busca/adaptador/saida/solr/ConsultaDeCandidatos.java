@@ -19,6 +19,21 @@ import java.util.List;
  */
 public class ConsultaDeCandidatos {
 
+    /**
+     * Abaixo deste comprimento a tolerância não é tentada.
+     *
+     * <p>Não é economia, é precisão. Com quatro letras, distância de edição 1
+     * alcança um vizinho enorme: {@code card} casa {@code cart}, {@code cardi},
+     * {@code carro}, {@code cara}. A lista voltaria cheia e errada, e lista
+     * errada com confiança é pior que lista vazia — em banco, oferecer consórcio
+     * a quem digitou "consignado" torto não é recuperação simpática, é produto
+     * errado.
+     */
+    static final int MINIMO_PARA_TOLERAR = 5;
+
+    /** De onde em diante vale distância 2 em vez de 1. */
+    static final int MINIMO_PARA_DISTANCIA_2 = 8;
+
     private final int pisoKAnonimato;
     private final List<String> tiposSugeriveis;
 
@@ -43,37 +58,24 @@ public class ConsultaDeCandidatos {
         // ------------------------------------------------------------------
         // 1 · FILTRAR — tirar o que não pode aparecer
         // ------------------------------------------------------------------
-        query.addFilterQuery("tipo:(" + String.join(" OR ", tiposSugeriveis) + ")");
-        query.addFilterQuery("vigencia_inicio_dt:[* TO NOW]");
-        query.addFilterQuery("vigencia_fim_dt:[NOW TO *]");
-
-        // Segmento e faixa vêm do token. São os dois unicos cortes de publico
-        // que cabem aqui, e cabem exatamente porque nao dependem do perfil:
-        // (prefixo, segmento, relacionamento) e uma chave de cache estavel.
-        query.addFilterQuery("{!terms f=segmento_ss}" + contexto.segmento().name());
-        query.addFilterQuery("{!terms f=relacionamento_ss}" + contexto.relacionamento().name());
-
-        // O piso de k-anonimato é fq, nunca pós-filtro: um termo abaixo dele
-        // não chega a pontuar, nem a ser contado. Afrouxar este número é o
-        // único parâmetro do projeto que vira incidente de privacidade em vez
-        // de queda de relevância.
+        // Os filtros estão em `aplicarFiltros` porque a consulta tolerante usa
+        // exatamente os mesmos. Ver o javadoc de montarTolerante: filtro que
+        // valha só para a consulta exata transforma a tolerante na forma de
+        // contorná-lo, e o piso de k-anonimato é um dos filtros.
         //
-        // E vale só para tipo:consulta, que é o que veio do log de busca de
-        // gente. Por muito tempo valeu para tudo, e parecia mais seguro. Não
-        // era: o catálogo não tinha trinta clientes distintos para declarar,
-        // então o semeador escrevia um número alto inventado em cada item só
-        // para o item passar. A regra estava certa e aplicada no lugar errado, e
-        // o preço era um dado falso no índice — exatamente onde ninguém olha
-        // para auditar privacidade.
+        // Entre eles, dois merecem a explicação que estava aqui:
         //
-        // Agora oferta cadastrada por jornada entra com zero e aparece no mesmo
-        // instante, e o piso continua intocado onde ele significa algo: termo
-        // digitado por pouca gente não sai daqui, promovido a evento ou não.
+        // Segmento e faixa vêm do token. São os dois únicos cortes de público
+        // que cabem no índice, e cabem exatamente porque não dependem do
+        // perfil: (prefixo, segmento, relacionamento) é chave de cache estável.
         //
-        // A forma é disjuntiva de propósito, e lida em voz alta é a regra:
-        // "ou não é termo do log, ou limpa o piso".
-        query.addFilterQuery(
-                "(*:* -tipo:consulta) OR clientes_distintos_i:[" + pisoKAnonimato + " TO *]");
+        // O piso de k-anonimato é fq, nunca pós-filtro: um termo abaixo dele não
+        // chega a pontuar, nem a ser contado. Afrouxar esse número é o único
+        // parâmetro do projeto que vira incidente de privacidade em vez de queda
+        // de relevância. E vale só para tipo:consulta, que é o que veio do log de
+        // busca de gente — a forma disjuntiva, lida em voz alta, é a regra: "ou
+        // não é termo do log, ou limpa o piso".
+        aplicarFiltros(query, contexto);
 
         // Produto contratado, elegibilidade e situação da conta seriam fq aqui
         // se o perfil chegasse antes da consulta. Ele não chega — as duas
@@ -99,10 +101,132 @@ public class ConsultaDeCandidatos {
         // depende do perfil e porque quem garante a linha do evento é a cota.
 
         query.setRows(limite);
-        query.setFields("oferta_id_s", "termo", "rotulo_s", "destino_s", "jornada_s", "tipo",
-                "produto_alvo_s", "exige_elegibilidade_b", "veta_inadimplencia_b",
-                "exige_conta_ativa_b", "gatilho_ss", "clientes_distintos_i", "score");
+        query.setFields(CAMPOS);
 
         return query;
     }
+
+    /**
+     * A segunda tentativa: a mesma consulta, tolerando erro de digitação.
+     *
+     * <p><strong>É consulta separada, e não uma cláusula a mais na primeira.</strong>
+     * Essa é a decisão que faz a tolerância custar zero no caminho quente. Com
+     * {@code q = "emprestmo OR emprestmo~1"} no edismax, o fuzzy seria aplicado a
+     * todos os campos do {@code qf} — inclusive aos dois EdgeNGram, onde cada
+     * palavra já está expandida em dezenas de gramas e a enumeração de termos
+     * difusos multiplica por isso. Toda busca pagaria por um recurso que só
+     * importa quando a busca falhou.
+     *
+     * <p>Assim, quem decide se vale a segunda ida é o {@link CatalogoSolr}, e ele
+     * só decide isso quando a primeira trouxe pouco — exatamente quando não há
+     * nada a perder, porque a alternativa era a lista vazia.
+     *
+     * <p><strong>Campo próprio, sem EdgeNGram.</strong> Vai contra
+     * {@code termo_tolerante}, que é palavra inteira. Fuzzy sobre grama de
+     * prefixo compara pedaço com pedaço e acha semelhança onde não há: o grama
+     * {@code emp} está a distância 1 de {@code amp}, {@code emb} e {@code imp},
+     * que são começos de palavras sem relação nenhuma.
+     *
+     * <p><strong>Os filtros são os mesmos.</strong> Repetir segmento, faixa,
+     * vigência e piso de k-anonimato não é duplicação a ser removida: é a
+     * garantia de que a segunda tentativa não é uma porta lateral para o que a
+     * primeira filtrou. Um fuzzy sem o {@code fq} do piso devolveria termo de
+     * pouca gente com erro de digitação por cima — vazamento com disfarce.
+     */
+    public SolrQuery montarTolerante(Prefixo prefixo, ContextoDeBusca contexto, int limite) {
+        var query = new SolrQuery();
+
+        query.setQuery(expressaoTolerante(prefixo.valor()));
+
+        // defType lucene, e não edismax: a expressão já nomeia o campo e a
+        // distância de cada termo, e o edismax reescreveria isso contra o qf.
+        query.set("defType", "lucene");
+
+        aplicarFiltros(query, contexto);
+
+        // Sem o `boost` multiplicativo da consulta exata. Aqui o score mede
+        // semelhança de escrita, não interesse: multiplicar por CTR faria uma
+        // recuperação de erro de digitação ser ordenada por popularidade da
+        // população, e o que a pessoa quer é a palavra que ela tentou escrever.
+        query.setRows(limite);
+        query.setFields(CAMPOS);
+
+        return query;
+    }
+
+    /**
+     * Se vale tentar tolerar este prefixo.
+     *
+     * <p>Basta uma palavra com tamanho suficiente: em "financiemento imovel" o
+     * erro está na primeira, e exigir que todas passassem o mínimo descartaria a
+     * frase por causa de "imovel".
+     */
+    public boolean toleravel(Prefixo prefixo) {
+        for (String palavra : prefixo.valor().split("\\s+")) {
+            if (palavra.length() >= MINIMO_PARA_TOLERAR) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code termo_tolerante:(financiemento~2 imovel~1)}.
+     *
+     * <p>A distância cresce com o tamanho da palavra porque é assim que o erro
+     * se comporta: uma letra errada em cinco é 20% do texto, uma letra errada em
+     * doze é 8%. Distância fixa 2 seria frouxa demais em palavra curta e apertada
+     * demais em palavra longa.
+     *
+     * <p>Palavra abaixo do mínimo entra <em>exata</em>, sem {@code ~}. Ela não é
+     * descartada — "imovel" ainda precisa casar — mas também não ganha licença
+     * para variar.
+     */
+    private static String expressaoTolerante(String prefixoNormalizado) {
+        var termos = new StringBuilder();
+
+        for (String palavra : prefixoNormalizado.split("\\s+")) {
+            if (palavra.isEmpty()) {
+                continue;
+            }
+            if (!termos.isEmpty()) {
+                termos.append(' ');
+            }
+            termos.append(palavra);
+
+            if (palavra.length() >= MINIMO_PARA_DISTANCIA_2) {
+                termos.append("~2");
+            } else if (palavra.length() >= MINIMO_PARA_TOLERAR) {
+                termos.append("~1");
+            }
+        }
+
+        // O prefixo já vem normalizado para [a-z0-9 ] por Prefixo/Normalizacao,
+        // então não há metacaractere de consulta para escapar aqui. É a mesma
+        // garantia de que a consulta exata depende.
+        return "termo_tolerante:(" + termos + ")";
+    }
+
+    /**
+     * Os filtros que valem para qualquer tentativa.
+     *
+     * <p>Extraídos para que a consulta tolerante não possa divergir da exata por
+     * esquecimento. Se um filtro novo entrar só na exata, a tolerante vira a
+     * forma de contorná-lo.
+     */
+    private void aplicarFiltros(SolrQuery query, ContextoDeBusca contexto) {
+        query.addFilterQuery("tipo:(" + String.join(" OR ", tiposSugeriveis) + ")");
+        query.addFilterQuery("vigencia_inicio_dt:[* TO NOW]");
+        query.addFilterQuery("vigencia_fim_dt:[NOW TO *]");
+        query.addFilterQuery("{!terms f=segmento_ss}" + contexto.segmento().name());
+        query.addFilterQuery("{!terms f=relacionamento_ss}" + contexto.relacionamento().name());
+        query.addFilterQuery(
+                "(*:* -tipo:consulta) OR clientes_distintos_i:[" + pisoKAnonimato + " TO *]");
+    }
+
+    private static final String[] CAMPOS = {
+            "oferta_id_s", "termo", "rotulo_s", "destino_s", "jornada_s", "tipo",
+            "produto_alvo_s", "exige_elegibilidade_b", "veta_inadimplencia_b",
+            "exige_conta_ativa_b", "gatilho_ss", "clientes_distintos_i", "score"
+    };
 }

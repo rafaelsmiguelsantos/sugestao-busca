@@ -1,5 +1,6 @@
 package dev.sugestao.busca.configuracao;
 
+import dev.sugestao.busca.adaptador.entrada.web.LimitadorDeTaxa;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,7 +17,9 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -24,6 +27,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 
 /**
  * Quem pode chamar o quê.
@@ -70,6 +74,16 @@ public class ConfiguracaoDeSeguranca {
     public static final String ESCREVER_OFERTAS = "SCOPE_ofertas:escrever";
     public static final String EXECUTAR_APRENDIZADO = "SCOPE_aprendizado:executar";
 
+    /**
+     * Ler a métrica de qualidade de busca.
+     *
+     * <p>Escopo separado de {@code aprendizado:executar} porque são papéis
+     * diferentes: quem acompanha a qualidade da busca não precisa poder disparar
+     * uma rodada de agregação, e quem opera o catálogo não precisa ver a
+     * latência por etapa.
+     */
+    public static final String LER_METRICAS = "SCOPE_metricas:ler";
+
     private static final String BASE_DE_PROBLEMAS = "https://sugestao-busca.dev/problemas/";
 
     /**
@@ -79,12 +93,16 @@ public class ConfiguracaoDeSeguranca {
      * faz um import errado compilar na metade do arquivo e falhar na outra.
      */
     private final SugestaoProperties.Seguranca seguranca;
+    private final SugestaoProperties.LimiteDeTaxa limiteDeTaxa;
     private final ObjectMapper json;
 
     public ConfiguracaoDeSeguranca(SugestaoProperties props, ObjectMapper json) {
         this.seguranca = props.seguranca() == null
                 ? SugestaoProperties.Seguranca.padrao()
                 : props.seguranca();
+        this.limiteDeTaxa = props.limiteDeTaxa() == null
+                ? SugestaoProperties.LimiteDeTaxa.padrao()
+                : props.limiteDeTaxa();
         this.json = json;
     }
 
@@ -126,6 +144,21 @@ public class ConfiguracaoDeSeguranca {
         return decodificador;
     }
 
+    /**
+     * O limitador de taxa, ou vazio.
+     *
+     * <p>Mesmo padrão do disjuntor e do medidor: desligar é <em>não existir no
+     * caminho</em>, e não um limitador configurado para nunca disparar. Um
+     * limitador com teto infinito continuaria consultando o mapa, criando chave
+     * e gastando memória para concluir que pode passar.
+     */
+    private Optional<LimitadorDeTaxa> limitador() {
+        return limiteDeTaxa.habilitado()
+                ? Optional.of(new LimitadorDeTaxa(
+                        limiteDeTaxa.porMinuto(), limiteDeTaxa.tetoDeChaves(), json))
+                : Optional.empty();
+    }
+
     @Bean
     public SecurityFilterChain cadeia(HttpSecurity http) throws Exception {
 
@@ -139,14 +172,20 @@ public class ConfiguracaoDeSeguranca {
             log.warn("que e dito pelo cliente e nao provado. Nunca em producao.");
             log.warn("=".repeat(70));
 
-            return http
+            var aberta = http
                     .csrf(csrf -> csrf.disable())
                     .cors(Customizer.withDefaults())
-                    .authorizeHttpRequests(rotas -> rotas.anyRequest().permitAll())
-                    .build();
+                    .authorizeHttpRequests(rotas -> rotas.anyRequest().permitAll());
+
+            // O limite de taxa vale também no modo aberto, e aqui a chave cai
+            // toda no endereço remoto — não há token para ler. Vale mesmo assim:
+            // é justamente o modo em que não há nenhuma outra barreira.
+            limitador().ifPresent(l -> aberta.addFilterBefore(l, AuthorizationFilter.class));
+
+            return aberta.build();
         }
 
-        return http
+        var cadeia = http
                 // Sem CSRF: não há sessão nem cookie. A credencial é um token no
                 // cabeçalho Authorization, que o navegador não anexa sozinho —
                 // e é a anexação automática que o CSRF existe para conter.
@@ -184,6 +223,18 @@ public class ConfiguracaoDeSeguranca {
                         // perguntar.
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
 
+                        // A métrica de qualidade de busca tem escopo próprio, e
+                        // não é pública. Ela não carrega prefixo nem cliente —
+                        // o MedidorMicrometer existe para garantir isso — mas
+                        // carrega a forma do serviço: taxa de zero-resultado por
+                        // faixa de prefixo, latência por etapa e volume de
+                        // descarte por motivo contam a quem perguntar onde este
+                        // serviço é frágil e quais produtos pouca gente pode
+                        // contratar.
+                        .requestMatchers(org.springframework.http.HttpMethod.GET,
+                                "/actuator/metrics", "/actuator/metrics/**")
+                            .hasAuthority(LER_METRICAS)
+
                         .requestMatchers(org.springframework.http.HttpMethod.GET, "/v1/sugestoes")
                             .hasAuthority(LER_SUGESTAO)
 
@@ -213,9 +264,24 @@ public class ConfiguracaoDeSeguranca {
 
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(this::semCredencial)
-                        .accessDeniedHandler(this::semPermissao))
+                        .accessDeniedHandler(this::semPermissao));
 
-                .build();
+        // DEPOIS do filtro que lê o Bearer, e ANTES do que autoriza.
+        //
+        // A posição é a decisão: depois da leitura do token, a chave do limite
+        // pode ser o `sub` provado, que é a única chave não falsificável; antes
+        // da autorização, o limite ainda se aplica a quem mandou token inválido
+        // ou nenhum — e esse é o tráfego que mais interessa limitar, porque
+        // validar assinatura HMAC em laço é gasto de CPU.
+        //
+        // Invertida, a ordem daria uma das duas perdas: depois da autorização,
+        // requisição não autenticada nunca chegaria ao limitador; antes da
+        // leitura do token, todo mundo seria limitado por IP e um prédio atrás
+        // de NAT contaria como um chamador.
+        limitador().ifPresent(l ->
+                cadeia.addFilterAfter(l, BearerTokenAuthenticationFilter.class));
+
+        return cadeia.build();
     }
 
     /**

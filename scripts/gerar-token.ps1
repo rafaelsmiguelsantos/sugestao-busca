@@ -130,7 +130,13 @@ switch ($Tipo) {
             sub   = 'operacao-catalogo'
             iat   = $iat
             exp   = $exp
-            scope = 'ofertas:escrever ofertas:ler ofertas:todas aprendizado:executar'
+            # 'metricas:ler' entra aqui e NAO no token de cliente: a metrica de
+            # qualidade de busca nao carrega prefixo nem cliente, mas carrega a
+            # forma do servico — taxa de zero-resultado por faixa de prefixo,
+            # latencia por etapa e volume de descarte por motivo contam a quem
+            # perguntar onde este servico e fragil e quais produtos pouca gente
+            # pode contratar.
+            scope = 'ofertas:escrever ofertas:ler ofertas:todas aprendizado:executar metricas:ler'
         }
         $descricao = 'operacao (cadastra em QUALQUER jornada)'
     }

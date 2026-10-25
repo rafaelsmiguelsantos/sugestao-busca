@@ -603,6 +603,268 @@ anterior dava `3,0` redondo porque não decaía nada.
 
 ---
 
+## 16. Medir antes de mexer no ranking
+
+**Decisão.** A porta `MedidorDeBusca` e o adaptador Micrometer foram escritos
+*antes* das três mudanças de relevância desta rodada, não depois.
+
+**Por quê.** Tolerância a erro de digitação, sinal negativo e afinidade por
+produto são todos afirmações sobre quantas buscas passam a encontrar algo. Sem
+taxa de zero-resultado medida antes e depois, "melhorou" é opinião — e pior,
+opinião que ninguém consegue contestar com número.
+
+**O que a medição custou admitir.** Ela não melhora nada que o cliente veja. É
+instrumentação pura, e num POC de entrevista é o item mais difícil de justificar
+porque não há demonstração. O argumento que sustenta é outro: os três sinais que
+vieram depois têm limites conhecidos — esparsidade da afinidade por produto, ruído
+da tendência, viés de posição da fadiga — e nenhum desses limites é observável sem
+isto.
+
+**O desfecho em quatro valores, e não dois.** Lista vazia ou não vazia é a
+classificação óbvia e ela esconde o caso que motivou a rodada:
+
+| desfecho | significado |
+|---|---|
+| `PREFIXO_RECUSADO` | nem era busca — alguém no meio da primeira letra |
+| `ZERO_RESULTADO` | buscou e não achou nada |
+| `SEM_OFERTA` | achou linhas, nenhuma acionável |
+| `COM_OFERTA` | achou oferta |
+
+`q=financiamento` devolvia uma linha de ação e nenhuma oferta. Não era
+zero-resultado, então nenhum contador de lista vazia acusaria; não era sucesso,
+porque quem buscou financiamento não recebeu proposta. Com dois valores, o caso é
+invisível.
+
+E `prefixoAceito` foi acrescentado ao rastro só para separar "não encontrou" de
+"nem era busca". Sem isso, a taxa de zero-resultado fica dominada por gente
+digitando a primeira letra e para de significar qualquer coisa — justamente a
+métrica que ia dizer se a tolerância funcionou.
+
+**Recusado: chamar o `MeterRegistry` direto do caso de uso.** Economizaria dois
+arquivos e custaria a propriedade que sustenta o desenho — o caso de uso não
+conhece framework nenhum e é testável inteiro sem subir contexto.
+
+**Recusado: rótulo com o prefixo.** Dois motivos, e cada um basta. Privacidade:
+prefixo é texto de busca de uma pessoa, e o piso de k-anonimato existe para que
+termo raro não saia do serviço; um contador
+`busca{prefixo="adiantamento para maria"}` desfaria isso pela porta da
+observabilidade, onde ninguém procura vazamento — e painel de métrica costuma ser
+mais acessível que índice de busca. Custo: cardinalidade ilimitada derruba o
+coletor, e com ele as métricas que iam ser úteis. O prefixo entra como faixa de
+comprimento, que responde "a partir de quantas letras a busca encontra?" sem
+guardar nenhuma letra.
+
+---
+
+## 17. Tolerância a erro de digitação como segunda consulta
+
+**Decisão.** Quando a consulta exata traz menos de três candidatos, o adaptador
+faz uma **segunda** consulta ao Solr, com distância de edição, contra um campo
+próprio sem EdgeNGram.
+
+**Por quê não uma cláusula na primeira.** Com `q = "emprestmo OR emprestmo~1"` no
+edismax, o fuzzy é aplicado a todos os campos do `qf` — inclusive aos dois
+EdgeNGram, onde cada palavra já está expandida em dezenas de gramas e a
+enumeração de termos difusos multiplica por isso. Toda busca pagaria por um
+recurso que só importa quando a busca falhou. Como segunda tentativa, o custo no
+caminho quente é **zero**, e a ida extra acontece exatamente quando a alternativa
+era a lista vazia.
+
+**Por quê campo próprio.** Fuzzy sobre grama de prefixo compara pedaço com pedaço
+e acha semelhança onde não há: o grama `emp` está a distância 1 de `amp`, `emb` e
+`imp`, que são começos de palavras sem relação nenhuma.
+
+**O limite de 5 caracteres não é economia, é precisão.** Com quatro letras,
+distância 1 alcança um vizinho enorme — `card` casa `cart`, `cardi`, `carro`,
+`cara`. Lista errada com confiança é pior que lista vazia, e em banco oferecer
+consórcio a quem digitou "consignado" torto não é recuperação simpática, é produto
+errado.
+
+**O enum em vez de um booleano.** `ToleranciaAplicada` distingue
+`ACIONADA_COM_GANHO` de `ACIONADA_SEM_GANHO` porque esta é a única melhoria da
+rodada que pode **piorar a precisão enquanto melhora a cobertura**. Sem separar os
+dois, o único número visível seria a queda da taxa de zero-resultado, que cairia
+igual se metade das recuperações fosse lixo.
+
+**O escopo, declarado:** isto conserta erro de **digitação**, não falta de
+vocabulário. `grana` continua devolvendo zero, e nenhuma distância de edição
+conserta sinônimo que não existe.
+
+**Decisão operacional que apareceu junto.** A Schema API do Solr processa o lote
+inteiro de forma atômica: reaplicar `schema-sugestoes.json` numa coleção existente
+falha com "already exists" campo a campo e **nada** é adicionado, nem o campo
+novo. Daí `solr/schema-tolerancia.json`, com só o delta. E como `copyField` age na
+indexação, aplicar o delta não preenche documento existente — precisa de
+`semear-vocabulario.ps1 -Limpar` depois.
+
+---
+
+## 18. O sinal negativo, e a invariante que caiu
+
+**Decisão.** Linha exibida muitas vezes e nunca clicada passa a valer menos, por
+cliente.
+
+**A invariante que isso quebrou.** O `Rankeador` mantinha, de propósito: "os
+sinais só promovem, nunca rebaixam; para rebaixar existe a `Peneira`, que também
+devolve o motivo". A frase continua certa. O que havia do outro lado era um
+defeito maior: **sem sinal negativo o ranking só sabe concordar consigo mesmo.**
+Uma oferta exibida quarenta vezes e nunca clicada não perdia nada, porque `ctr` é
+agregado da **população** e não desta pessoa.
+
+Trocada por uma invariante mais fraca e verificável: *rebaixar é permitido, apagar
+não, e todo rebaixamento vai para o rastro.*
+
+**A ordem das operações não é intercambiável.** Promover, limitar no teto,
+rebaixar pela fadiga. Rebaixar antes do teto faria a fadiga desaparecer quando o
+produto das promoções estourasse o limite — ela pararia de funcionar exatamente
+para quem tem mais afinidade, que é quem mais precisa dela. Há teste de unidade
+dedicado só a essa ordem, porque a forma errada **falha em silêncio**.
+
+**O que foi deliberadamente não corrigido: viés de posição.** Uma linha na posição
+5 é vista menos que uma na posição 0, e contar "exibiu e não clicou" trata as duas
+igual — a linha que já estava embaixo acumula fadiga mais rápido e afunda mais.
+Corrigir exige modelo de propensão: estimar a probabilidade de a linha ter sido
+*vista*, não só exibida. É trabalho de outra ordem de grandeza, e esperar por ele
+para não ter sinal negativo nenhum deixaria o defeito maior no lugar para evitar o
+menor.
+
+**Dois defeitos meus, achados verificando.**
+
+O primeiro: a agregação guardava a chave **normalizada** (`antecipacao de limite`)
+e o `Rankeador` consultava com o termo **cru** do índice (`antecipação de limite`,
+com acento). A chave nunca casava para nenhum termo acentuado — a maior parte do
+catálogo. A fadiga era calculada, gravada no perfil e lida a cada tecla sem
+rebaixar nada. Mesma família do defeito que a afinidade já tinha tido com a
+jornada. Pior: a verificação de ponta a ponta **passava verde**, porque a linha
+subia por outro motivo (afinidade de produto) e o script media só "subiu ou não".
+O conserto foi normalizar na leitura, dentro de `Perfil.fadigaDe` — o mapa é
+guardado normalizado, então quem o acessa normaliza, em vez de esperar que todos
+os chamadores futuros lembrem.
+
+O segundo: havia um `fadigaMaxima` de 0,4 na fadiga e um `fadigaMinima` de 0,6 no
+ranking, e os dois se multiplicavam. No teto, o fator saía
+`1 − 0,4 × (1 − 0,6) = 0,84` — uma perda de 16% que não é o que nenhum dos dois
+números dizia. Apareceu numa verificação esperando 0,6 e encontrando 0,84. Agora a
+fadiga devolve só a **fração** da penalidade (0 a 1) e a profundidade é uma decisão
+só. Dois tetos para a mesma coisa produzem efeito que ninguém prevê lendo a
+configuração.
+
+---
+
+## 19. Afinidade em dois níveis, e o teto que silenciava um sinal
+
+**Decisão.** A afinidade passa a ter dois níveis: jornada e `produtoAlvo`.
+
+**Por quê.** Era um escalar por jornada, e isso a tornava incapaz de responder à
+pergunta mais comum: **financiamento, empréstimo e consignado são todos da jornada
+`credito`**, então clicar em consignado promovia empréstimo exatamente igual. O
+sistema sabia que a pessoa queria crédito e não tinha como saber qual.
+
+**A fraqueza foi declarada antes de o código começar, e é esparsidade.** Há meia
+dúzia de jornadas e vinte e tantos produtos; o clique se espalha. Com o mesmo piso
+de confiança nos dois níveis (6,0 pontos, três cliques), a afinidade por produto
+ficaria matematicamente correta e **praticamente sempre zero** — um recurso inerte
+que ninguém notaria estar inerte. O conserto é piso mais baixo no nível do produto
+(4,0), com preço declarado: ele acredita com menos evidência. O teto menor no
+ranking (1,2 contra 1,5) é quem paga esse preço.
+
+**E um teste encontrou a fraqueza em outro lugar, pior.** O teto do produto de
+todos os fatores foi posto em **3,0** — "conservador", porque era o máximo que o
+sistema já tinha de fato: `1,6 × 1,25 × 1,5` dá exatamente 3,0. Com esse teto, uma
+linha de jornada líder com produto e afinidade máxima de jornada **já está no
+teto**, e a afinidade por produto multiplicava um valor que o limite cortava de
+volta. Os dois candidatos saíam em 3,0 e o desempate — o motivo de o sinal existir
+— não acontecia. O recurso não ficava fraco: ficava **inerte**, e justamente para
+quem tem mais comportamento registrado.
+
+O teto virou 3,6 = `1,6 × 1,25 × 1,5 × 1,2`, os quatro fatores que precisam caber.
+A tendência (1,15) fica acima e é cortada no topo, de propósito: no limite, o sinal
+de menos confiança é o primeiro a ser descartado.
+
+**A lição que vale mais que o número:** o teto era **emergente** do produto dos
+pesos e não estava escrito em lugar nenhum, então acrescentar um fator mudava o
+máximo do sistema em silêncio. Agora é declarado em `PesosDeRanking.fatorMaximo`.
+
+---
+
+## 20. A tendência: duas janelas, e eu recomendei adiar
+
+**Decisão.** Afinidade calculada em janela curta (7 d) e longa (30 d); a razão
+entre as duas, normalizada, promove quem está com interesse em alta.
+
+**Registro honesto:** eu recomendei **adiar** este item e expliquei por quê. A
+decisão de incluí-lo foi de quem pediu, depois de ler a objeção. A objeção continua
+válida e está codificada no piso.
+
+**O que ela acrescenta que a meia-vida não dá.** Uma exponencial só diz "quanto",
+não "para onde". A meia-vida de sete dias já faz evento recente dominar, mas não
+distingue *disparou esta semana* de *constante há um mês* — a diferença entre
+necessidade transitória e interesse durável.
+
+**O ponto neutro não é 0,5: é 7/30 ≈ 0,23.** Como a curta está contida na longa, a
+razão vive em [0,1], e atividade uniforme produz exatamente a razão das janelas.
+Comparar com 0,5 chamaria de "esfriando" todo mundo que está normal.
+
+**A fraqueza, codificada.** Razão entre números pequenos é ruído: com três cliques
+no total, um clique a mais move a razão de 0,33 para 0,66 e a "tendência" dobraria
+por causa de um toque. O `pisoDaTendencia` de 4,0 pontos faz a tendência devolver
+neutro **exato** abaixo dele — e quantas vezes isso acontece é visível na métrica
+da decisão 16. É assim que se descobre se o recurso está dizendo algo ou está
+desligado de fato.
+
+**Limite estrutural, declarado.** A tendência **não é verificável de ponta a ponta
+pela API pública**, porque `ocorridoEm` é atribuído pelo servidor na ingestão: não
+há como injetar um evento de trinta dias atrás por fora. A matemática tem teste de
+unidade; o comportamento em produção só a métrica dirá.
+
+**E a tendência só promove.** Rebaixar por tendência fria puniria quem demonstrou
+interesse há três semanas, e o decaimento da afinidade já cuida do esquecimento
+com uma curva que tem física por trás.
+
+---
+
+## 21. Limite de taxa como decorador, e o que ele não resolve
+
+**Decisão.** Limite por minuto na rota de sugestões, chaveado pelo `sub` do token
+com o endereço remoto como alternativa.
+
+**Por quê.** Único item desta rodada que é **risco** e não qualidade. Typeahead sem
+limite é amplificador de carga — um cliente em laço consome a capacidade medida — e
+via de raspagem do catálogo: qualquer portador de token de cliente enumera as
+ofertas varrendo prefixos.
+
+**A posição na cadeia é a decisão.** Depois do filtro que lê o Bearer, antes do que
+autoriza. Depois da leitura, a chave é o `sub` provado, a única não falsificável;
+antes da autorização, o limite ainda alcança quem mandou token inválido ou nenhum —
+e esse é o tráfego que mais interessa limitar, porque validar assinatura HMAC em
+laço é gasto de CPU. Invertida, a ordem daria uma das duas perdas: depois da
+autorização, requisição não autenticada nunca chegaria ao limitador; antes da
+leitura do token, todo mundo seria limitado por IP e um prédio atrás de NAT
+contaria como um chamador.
+
+**`getRemoteAddr` e não `X-Forwarded-For`:** o cabeçalho é dito pelo cliente, e
+aceitá-lo sem um proxy confiável configurado transforma o limite em opcional —
+basta variar o cabeçalho a cada requisição.
+
+**Teto de chaves rastreadas.** Sem ele o próprio limitador é o vetor: um atacante
+com tokens descartáveis faria o mapa crescer até o processo cair, usando a defesa
+como ataque.
+
+**Janela fixa, não deslizante.** A fixa admite o dobro do limite na virada do
+minuto. Para conter laço isso basta, e o custo é um contador por chave em vez de
+uma estrutura. A diferença importaria num limitador de cobrança, onde o número é
+contrato; aqui é teto de segurança.
+
+**O que ele honestamente não resolve, e vale escrever.** O contador é por processo
+e em memória: não sobrevive a restart e não é compartilhado entre instâncias — com
+três instâncias, o limite efetivo é o triplo. A camada que resolve é o gateway.
+Também não separa quem digita rápido de quem raspa devagar: os dois limites que
+isso exigiria são incompatíveis. Os 600/min protegem a digitação; o resto é
+detecção de comportamento, não contador. **O pior resultado possível seria alguém
+marcar "limite de taxa" como resolvido.**
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas
@@ -613,6 +875,40 @@ token carrega a jornada e o caso de uso confere o corpo contra ela.
 
 **~~A afinidade não esfria sozinha.~~** Resolvido na decisão 15, junto com o
 problema irmão de um clique valer afinidade máxima.
+
+**~~Não há sinal negativo: o ranking só sabe concordar consigo mesmo.~~**
+Resolvido na decisão 18 — com viés de posição declarado como limite remanescente.
+
+**~~A afinidade não distingue produtos da mesma jornada.~~** Resolvido na decisão
+19. A esparsidade continua sendo o risco, e é observável pela decisão 16.
+
+**~~Uma letra errada zera a lista.~~** Resolvido na decisão 17, para erro de
+digitação. Falta de vocabulário (`grana` → zero) continua aberta.
+
+**~~Não há limite de taxa.~~** Resolvido na decisão 21 — como defesa em
+profundidade, não como a camada principal, que é o gateway.
+
+**Viés de posição na fadiga.** Linha na posição 5 é vista menos que na 0, e a
+contagem de "exibiu e não clicou" trata as duas igual. Precisa de modelo de
+propensão. Ver decisão 18.
+
+**A tendência não é verificável de ponta a ponta.** `ocorridoEm` é atribuído pelo
+servidor, então não há como injetar evento antigo pela API. Ver decisão 20.
+
+**Falta de vocabulário coloquial.** `grana`, `dinheiro rápido` e afins devolvem
+zero. Não é erro de digitação e nenhuma distância de edição conserta: é sinônimo
+que não existe no catálogo, e preenchê-lo é trabalho de quem cura.
+
+**Nenhum perfil de demonstração tem elegibilidade de `FINANCIAMENTO_*`.** As duas
+ofertas de financiamento são inalcançáveis pelos oito perfis — mesma classe do
+buraco que o `CONSIGNADO` já teve. O conserto não é dar a elegibilidade: é um
+**teste** que falhe quando existir oferta no índice que nenhum perfil alcança, para
+isso parar de ser descoberta manual. Ainda não escrito.
+
+**Não há produto substituto.** Quem busca financiamento, é elegível a empréstimo e
+consignado, e recebe zero oferta, continua recebendo zero. Foi levantado,
+analisado, e deixado de fora desta rodada porque a decisão é de produto — oferecer
+substituto é aceitável neste contexto? — e não de engenharia.
 
 **A afinidade não distingue clique de arrepender.** Clicar e voltar em dois
 segundos conta igual a clicar e contratar — o `SUGESTAO_CLICADA` não tem duração

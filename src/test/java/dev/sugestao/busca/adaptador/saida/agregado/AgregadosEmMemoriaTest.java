@@ -2,6 +2,7 @@ package dev.sugestao.busca.adaptador.saida.agregado;
 
 import dev.sugestao.busca.dominio.Segmento;
 import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
+import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 import dev.sugestao.busca.dominio.evento.TipoDeEvento;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +20,7 @@ class AgregadosEmMemoriaTest {
 
     private static final Duration JANELA_DO_HISTORICO = Duration.ofHours(24);
     private static final PesosDeAfinidade PESOS = PesosDeAfinidade.padrao();
+    private static final PesosDeFadiga FADIGA = PesosDeFadiga.padrao();
     private static final String CLIENTE = "pf-teste";
 
     private final AgregadosEmMemoria agregados = new AgregadosEmMemoria(10_000);
@@ -47,7 +49,7 @@ class AgregadosEmMemoriaTest {
     }
 
     private double afinidade(String jornada) {
-        var comportamentos = agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS);
+        var comportamentos = agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA);
         if (comportamentos.isEmpty()) {
             return 0.0;
         }
@@ -79,7 +81,19 @@ class AgregadosEmMemoriaTest {
     @DisplayName("três cliques chegam ao máximo; trezentos não passam dele")
     void tresCliquesChegamAoTeto() {
         agregados.acumular(List.of(clique("credito"), clique("credito"), clique("credito")));
-        assertThat(afinidade("credito")).isEqualTo(1.0);
+
+        // isCloseTo e nao isEqualTo, e a tolerancia tem motivo.
+        //
+        // O clique e criado em Instant.now() e a agregacao chama Instant.now()
+        // de novo: a idade do evento e de microssegundos, mas nao e zero, e o
+        // decaimento a desconta. Tres cliques dao 5,999999993 pontos em vez de
+        // 6,0 exatos, e a afinidade sai 0,9999999988.
+        //
+        // Com isEqualTo(1.0) este teste passava ou falhava conforme o relogio
+        // tivesse ou nao virado o milissegundo entre criar o evento e agregar —
+        // flaky por construcao, passando por sorte. A propriedade real e "tres
+        // cliques chegam ao teto", e ela nao depende do nono digito decimal.
+        assertThat(afinidade("credito")).isCloseTo(1.0, within(1e-6));
 
         // O limite em 1 é o que preserva a propriedade que a normalização pelo
         // próprio máximo protegia: quem clicou três vezes e quem clicou
@@ -88,6 +102,10 @@ class AgregadosEmMemoriaTest {
         for (int i = 0; i < 300; i++) {
             agregados.acumular(List.of(clique("credito")));
         }
+        // Aqui isEqualTo cabe: com 600 pontos o Math.min corta em 1,0 exato, e o
+        // decaimento de microssegundos nao chega perto de tirar os 594 pontos de
+        // folga. A diferenca entre as duas assercoes deste teste e justamente o
+        // ponto: uma vive na borda do teto, a outra esta bem dentro dele.
         assertThat(afinidade("credito")).isEqualTo(1.0);
     }
 
@@ -109,7 +127,7 @@ class AgregadosEmMemoriaTest {
         agregados.acumular(List.of(busca("emprestimo pessoal"), busca("consignado")));
 
         assertThat(afinidade("credito")).isZero();
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS))
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA))
                 .singleElement()
                 .satisfies(c -> assertThat(c.afinidadePorJornada()).isEmpty());
     }
@@ -167,7 +185,21 @@ class AgregadosEmMemoriaTest {
         double segunda = afinidade("credito");
         double terceira = afinidade("credito");
 
-        assertThat(primeira).isEqualTo(segunda).isEqualTo(terceira);
+        // Tolerancia, e nao igualdade exata — e a tolerancia aqui NAO e
+        // formalidade, e o conteudo do teste.
+        //
+        // A igualdade exata era falsa de direito: o decaimento e por idade, a
+        // idade cresce entre as tres chamadas, e portanto o valor cai um pouco a
+        // cada uma. O teste passava so porque as tres chamadas caiam no mesmo
+        // milissegundo do relogio.
+        //
+        // E o que ele quer afirmar e outra coisa, mais forte: rodar a agregacao
+        // uma vez ou tres vezes NAO esvazia a afinidade. Com decaimento por
+        // rodada, a terceira chamada devolveria uma fracao da primeira — nao uma
+        // diferenca no sexto decimal. A tolerancia de 1e-6 separa exatamente
+        // esses dois mundos.
+        assertThat(segunda).isCloseTo(primeira, within(1e-6));
+        assertThat(terceira).isCloseTo(primeira, within(1e-6));
     }
 
     @Test
@@ -194,7 +226,7 @@ class AgregadosEmMemoriaTest {
         // tinha a afinidade contada, guardada, e sem nenhum efeito no ranking.
         agregados.acumular(List.of(clique("Crédito"), clique("CREDITO "), clique("credito")));
 
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS))
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA))
                 .singleElement()
                 .satisfies(c -> {
                     assertThat(c.afinidadePorJornada()).containsOnlyKeys("credito");
@@ -216,7 +248,7 @@ class AgregadosEmMemoriaTest {
         // O sinal mais fraco do conjunto virava o mais forte, pela porta de trás.
         agregados.acumular(List.of(clique("busca"), clique("busca"), clique("credito")));
 
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS))
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA))
                 .singleElement()
                 .satisfies(c -> assertThat(c.afinidadePorJornada()).containsOnlyKeys("credito"));
     }
@@ -226,7 +258,7 @@ class AgregadosEmMemoriaTest {
     void jornadaAusenteNaoAcumula() {
         agregados.acumular(List.of(clique(""), clique(null), clique("   ")));
 
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS)).isEmpty();
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA)).isEmpty();
     }
 
     // -----------------------------------------------------------------------
@@ -240,7 +272,7 @@ class AgregadosEmMemoriaTest {
         // Não é defeito daqui: a agregação monta cada dimensão do que viu.
         agregados.acumular(List.of(clique("credito")));
 
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS)).singleElement()
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA)).singleElement()
                 .satisfies(c -> {
                     assertThat(c.historico()).isEmpty();
                     assertThat(c.afinidadePorJornada()).isNotEmpty();
@@ -275,7 +307,7 @@ class AgregadosEmMemoriaTest {
     void historicoMaisRecentePrimeiro() {
         agregados.acumular(List.of(busca("pix"), busca("boleto"), busca("pix")));
 
-        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS)).singleElement()
+        assertThat(agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA)).singleElement()
                 .satisfies(c -> assertThat(c.historico()).containsExactly("pix", "boleto"));
     }
 
@@ -290,7 +322,7 @@ class AgregadosEmMemoriaTest {
                 evento(TipoDeEvento.BUSCA_DIGITADA, "", "busca antiga", 3),
                 clique("credito", 3)));
 
-        var comportamentos = agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS);
+        var comportamentos = agregados.comportamentos(JANELA_DO_HISTORICO, 10, PESOS, FADIGA);
 
         assertThat(comportamentos).singleElement().satisfies(c -> {
             assertThat(c.historico()).as("fora da janela de 24 h do historico").isEmpty();

@@ -56,7 +56,80 @@ public record SugestaoProperties(
         Disjuntor disjuntor,
 
         /* Quem pode chamar o que. Ver ConfiguracaoDeSeguranca. */
-        Seguranca seguranca) {
+        Seguranca seguranca,
+
+        /* Tolerancia a erro de digitacao. Ver ConsultaDeCandidatos. */
+        Busca busca,
+
+        /* Medicao da qualidade da busca. Ver MedidorDeBusca. */
+        Medicao medicao,
+
+        /* Limite de taxa na rota de digitacao. Ver LimitadorDeTaxa. */
+        LimiteDeTaxa limiteDeTaxa) {
+
+    /**
+     * A tolerância a erro de digitação.
+     *
+     * <p>Um interruptor só, e de propósito: os dois números que governam a
+     * tolerância — comprimento mínimo e distância por tamanho — são decisões de
+     * relevância que se discutem lendo {@code ConsultaDeCandidatos}, não valores
+     * para alguém girar em produção. Expor um "distância máxima" configurável
+     * convidaria a subi-lo até a busca passar a encontrar qualquer coisa, o que é
+     * exatamente o modo de falha desta funcionalidade.
+     */
+    public record Busca(boolean toleranciaHabilitada) {
+
+        public static Busca padrao() {
+            return new Busca(true);
+        }
+    }
+
+    /**
+     * Liga a medição da qualidade da busca.
+     *
+     * <p>Ligada por padrão, porque o custo é um contador em memória e o valor é
+     * a única evidência de que as mudanças de relevância fizeram algo. Desligar
+     * troca o adaptador pelo {@code MedidorDeBusca.NULO} — não por um medidor que
+     * finge medir.
+     */
+    public record Medicao(boolean habilitada) {
+
+        public static Medicao padrao() {
+            return new Medicao(true);
+        }
+    }
+
+    /**
+     * Quantas requisições por minuto cada chamador pode fazer na rota de
+     * sugestões.
+     *
+     * <p><strong>O número é alto de propósito, e isso é o ponto difícil
+     * deste parâmetro.</strong> Uma caixa de busca legitimamente faz uma
+     * requisição por tecla: quem digita "financiamento imobiliário" rápido gasta
+     * 25 em poucos segundos. Um limite apertado o bastante para incomodar quem
+     * raspa o catálogo quebra quem digita; um limite folgado o bastante para
+     * digitação não impede quem raspa com paciência. Os 600/min são calibrados
+     * para o primeiro — deixar a pessoa digitar — e o segundo problema não se
+     * resolve aqui.
+     *
+     * <p>É defesa em profundidade, não a camada principal. A camada principal é
+     * o gateway, que vê todas as instâncias e sobrevive a restart; este contador
+     * é por processo e em memória. Ver {@code LimitadorDeTaxa}.
+     */
+    public record LimiteDeTaxa(boolean habilitado, int porMinuto, int tetoDeChaves) {
+
+        public LimiteDeTaxa {
+            porMinuto = porMinuto <= 0 ? 600 : porMinuto;
+            // Teto de chaves rastreadas. Sem ele, o próprio limitador é o vetor:
+            // um atacante com tokens descartáveis faria o mapa crescer até o
+            // processo cair, usando a defesa como ataque.
+            tetoDeChaves = tetoDeChaves <= 0 ? 50_000 : tetoDeChaves;
+        }
+
+        public static LimiteDeTaxa padrao() {
+            return new LimiteDeTaxa(true, 600, 50_000);
+        }
+    }
 
     /**
      * Validação do token. Este serviço é servidor de recurso: valida e não
@@ -175,7 +248,41 @@ public record SugestaoProperties(
             double jornadaLider,
             double produtoDaJornada,
             double afinidadeMaxima,
-            double margemParaLiderar) { }
+
+            /* Teto da afinidade por PRODUTO. Menor que o da jornada. */
+            double afinidadeDeProdutoMaxima,
+
+            /* Teto da tendencia. O menor dos quatro: e o sinal de menos confianca. */
+            double tendenciaMaxima,
+
+            /*
+             * Teto do PRODUTO de todos os fatores de promocao, declarado em vez
+             * de emergente. Antes ele era 3,0 porque 1,6 x 1,25 x 1,5 da 3,0, e
+             * esse numero nao estava escrito em lugar nenhum — acrescentar um
+             * fator mudava o teto do sistema em silencio.
+             */
+            double fatorMaximo,
+
+            /*
+             * Piso do fator de fadiga. O unico peso abaixo de 1, e o unico que
+             * rebaixa. Em 0 ele removeria a linha sem dizer por que, que e
+             * trabalho da Peneira.
+             */
+            double fadigaMinima,
+
+            double margemParaLiderar) {
+
+        public Peso {
+            // Os cinco novos ganham padrao aqui, e nao no application.properties,
+            // para que uma configuracao antiga continue subindo. Sem isto, quem
+            // tiver o arquivo da versao anterior ve a aplicacao morrer na
+            // validacao de PesosDeRanking com zero em tres campos.
+            afinidadeDeProdutoMaxima = afinidadeDeProdutoMaxima < 1.0 ? 1.2 : afinidadeDeProdutoMaxima;
+            tendenciaMaxima = tendenciaMaxima < 1.0 ? 1.15 : tendenciaMaxima;
+            fatorMaximo = fatorMaximo < 1.0 ? 3.0 : fatorMaximo;
+            fadigaMinima = fadigaMinima <= 0 || fadigaMinima > 1.0 ? 0.6 : fadigaMinima;
+        }
+    }
 
     /**
      * O caminho de escrita. Nada aqui esta no orcamento de 30 ms: sao os
@@ -209,7 +316,40 @@ public record SugestaoProperties(
              * tres numeros substituem duas decisoes que, juntas, faziam o
              * sistema acreditar no primeiro clique e nunca esquecer.
              */
-            Afinidade afinidade) { }
+            Afinidade afinidade,
+
+            /*
+             * O sinal negativo: exibir e nao clicar. Ver PesosDeFadiga para as
+             * tres defesas (piso de evidencia, teto e janela) e para o que ele
+             * deliberadamente NAO corrige — vies de posicao.
+             */
+            Fadiga fadiga) { }
+
+    /**
+     * Quando uma linha exibida e ignorada passa a valer menos.
+     *
+     * <p>O <strong>piso de evidência</strong> é o número que mais importa aqui, e
+     * baixá-lo tem um efeito específico e ruim: oferta nova passa a ser penalizada
+     * antes de ter tido chance de receber clique, afunda, e nunca recebe. É o
+     * mesmo laço que o piso de confiança da afinidade corrige na direção oposta.
+     */
+    public record Fadiga(
+            int impressoesMinimas,
+            int impressoesParaOTeto,
+            int janelaDias) {
+
+        public Fadiga {
+            impressoesMinimas = impressoesMinimas <= 0 ? 5 : impressoesMinimas;
+            impressoesParaOTeto = impressoesParaOTeto <= impressoesMinimas
+                    ? impressoesMinimas * 4
+                    : impressoesParaOTeto;
+            janelaDias = janelaDias <= 0 ? 30 : janelaDias;
+        }
+
+        public static Fadiga padrao() {
+            return new Fadiga(5, 20, 30);
+        }
+    }
 
     /**
      * Janela, meia-vida e piso de confiança da afinidade.
@@ -225,16 +365,46 @@ public record SugestaoProperties(
      * hoje. Baixá-lo faz o sistema acreditar mais rápido; zerá-lo faz um clique
      * valer o máximo, que era o defeito.
      */
-    public record Afinidade(int janelaDias, int meiaVidaDias, double pisoDeConfianca) {
+    public record Afinidade(
+            int janelaDias,
+            int meiaVidaDias,
+            double pisoDeConfianca,
+
+            /*
+             * O piso do nivel do PRODUTO, mais baixo que o da jornada. Evidencia
+             * por produto e escassa — ha meia duzia de jornadas e vinte e tantos
+             * produtos — e um piso igual faria a afinidade por produto ficar
+             * correta e sempre zero. Ver PesosDeAfinidade.
+             */
+            double pisoDeConfiancaDoProduto,
+
+            /* As duas janelas da tendencia, em dias. */
+            int tendenciaCurtaDias,
+            int tendenciaLongaDias,
+
+            /*
+             * Pontos minimos na janela longa para a tendencia ser calculada.
+             * Abaixo disto ela devolve neutro, porque razao de numeros pequenos
+             * e ruido — e um sinal de ruido e pior que sinal nenhum.
+             */
+            double pisoDaTendencia) {
 
         public Afinidade {
             janelaDias = janelaDias <= 0 ? 90 : janelaDias;
             meiaVidaDias = meiaVidaDias <= 0 ? 7 : meiaVidaDias;
             pisoDeConfianca = pisoDeConfianca <= 0 ? 6.0 : pisoDeConfianca;
+            pisoDeConfiancaDoProduto = pisoDeConfiancaDoProduto <= 0
+                    ? 4.0
+                    : pisoDeConfiancaDoProduto;
+            tendenciaCurtaDias = tendenciaCurtaDias <= 0 ? 7 : tendenciaCurtaDias;
+            tendenciaLongaDias = tendenciaLongaDias <= tendenciaCurtaDias
+                    ? tendenciaCurtaDias * 4
+                    : tendenciaLongaDias;
+            pisoDaTendencia = pisoDaTendencia <= 0 ? 4.0 : pisoDaTendencia;
         }
 
         public static Afinidade padrao() {
-            return new Afinidade(90, 7, 6.0);
+            return new Afinidade(90, 7, 6.0, 4.0, 7, 30, 4.0);
         }
     }
 }

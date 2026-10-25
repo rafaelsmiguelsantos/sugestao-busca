@@ -91,21 +91,49 @@ class PesosDeAfinidadeTest {
     void configuracaoIncoerente() {
         // Piso zero devolveria afinidade máxima para o primeiro clique, que é
         // exatamente o defeito que esta classe existe para corrigir.
-        assertThatThrownBy(() -> new PesosDeAfinidade(Duration.ofDays(90), Duration.ofDays(7), 0))
+        assertThatThrownBy(() -> pesos(Duration.ofDays(90), Duration.ofDays(7), 0))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("primeiro clique");
 
         // Janela menor que a meia-vida corta o evento antes de ele ter decaído
         // de forma apreciável: o esquecimento volta a ser um corte seco, que é o
         // que esta classe substitui.
-        assertThatThrownBy(() -> new PesosDeAfinidade(Duration.ofDays(1), Duration.ofDays(7), 6))
+        assertThatThrownBy(() -> pesos(Duration.ofDays(1), Duration.ofDays(7), 6))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("corte seco");
 
-        assertThatThrownBy(() -> new PesosDeAfinidade(Duration.ZERO, Duration.ofDays(7), 6))
+        assertThatThrownBy(() -> pesos(Duration.ZERO, Duration.ofDays(7), 6))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new PesosDeAfinidade(Duration.ofDays(90), Duration.ZERO, 6))
+        assertThatThrownBy(() -> pesos(Duration.ofDays(90), Duration.ZERO, 6))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("janela curta >= longa faz a tendência ser sempre 1, e é recusada")
+    void tendenciaDegenerada() {
+        // Com curta >= longa a razão é sempre 1: a tendência viraria uma
+        // constante com nome de sinal, que é pior que não existir porque parece
+        // estar funcionando.
+        assertThatThrownBy(() -> new PesosDeAfinidade(
+                Duration.ofDays(90), Duration.ofDays(7), 6, 4,
+                Duration.ofDays(30), Duration.ofDays(30), 4))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sempre 1");
+
+        // A janela longa da tendência não pode passar da janela de acumulação:
+        // lá não há evento guardado, e o denominador viria truncado — inflando a
+        // tendência de todo mundo.
+        assertThatThrownBy(() -> new PesosDeAfinidade(
+                Duration.ofDays(30), Duration.ofDays(7), 6, 4,
+                Duration.ofDays(7), Duration.ofDays(60), 4))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("janela de acumulacao");
+    }
+
+    /** Só os três primeiros números variam nestes casos; o resto fica no padrão. */
+    private static PesosDeAfinidade pesos(Duration janela, Duration meiaVida, double piso) {
+        return new PesosDeAfinidade(janela, meiaVida, piso, 4.0,
+                Duration.ofDays(7), Duration.ofDays(30), 4.0);
     }
 
     @Test
