@@ -25,10 +25,30 @@ public record TermoAgregado(
         int exibicoes,
         int cliques,
         int adesoes,
-        Instant vistoEm) {
+        Instant vistoEm,
+
+        /**
+         * A jornada a que este termo pertence, inferida do catálogo curado na
+         * publicação. Começa vazia: quem digitou não declarou jornada nenhuma.
+         */
+        String jornada) {
 
     public TermoAgregado {
         segmentos = segmentos == null || segmentos.isEmpty() ? Set.of("PF") : Set.copyOf(segmentos);
+        jornada = jornada == null || jornada.isBlank() ? ClassificadorDeJornada.SEM_JORNADA : jornada;
+    }
+
+    /** Sem jornada: cai no balde {@code busca} até alguém classificá-lo. */
+    public TermoAgregado(
+            String termo, Set<String> segmentos, int clientesDistintos, int frequencia,
+            int exibicoes, int cliques, int adesoes, Instant vistoEm) {
+        this(termo, segmentos, clientesDistintos, frequencia, exibicoes, cliques,
+                adesoes, vistoEm, ClassificadorDeJornada.SEM_JORNADA);
+    }
+
+    public TermoAgregado classificadoComo(String outraJornada) {
+        return new TermoAgregado(termo, segmentos, clientesDistintos, frequencia,
+                exibicoes, cliques, adesoes, vistoEm, outraJornada);
     }
 
     /** Clique sobre impressão. Zero exibições significa "ainda não sei", não zero. */

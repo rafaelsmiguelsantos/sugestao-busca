@@ -38,7 +38,15 @@ public final class ClassificadorDeOrigem {
                 .toList();
     }
 
+    /**
+     * Só promove o que ainda não é evento e veio do índice. A segunda condição
+     * exclui o histórico: ele não é oferta, é lembrança, e transformá-lo em
+     * evento daria a uma busca antiga do próprio cliente a linha reservada à
+     * oportunidade de agora.
+     */
     private boolean ehOportuno(Candidato candidato, Perfil perfil) {
-        return candidato.origem().veioDoIndice() && perfil.temAlgumGatilho(candidato.gatilhos());
+        return candidato.origem() != Origem.EVENTO
+                && candidato.origem().veioDoIndice()
+                && perfil.temAlgumGatilho(candidato.gatilhos());
     }
 }

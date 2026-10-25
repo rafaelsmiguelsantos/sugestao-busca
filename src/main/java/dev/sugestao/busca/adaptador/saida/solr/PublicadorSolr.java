@@ -67,7 +67,13 @@ public class PublicadorSolr implements PublicadorDeVocabulario {
         // declarada, não empurra produto e não exige elegibilidade de nada.
         // Quem curou catálogo foi uma pessoa; isto aqui foi digitado.
         doc.setField("tipo", "consulta");
-        doc.setField("jornada_s", "busca");
+
+        // A jornada foi inferida do catálogo curado, não declarada por quem
+        // digitou. Ela serve ao ranking — jornada líder e afinidade do cliente
+        // — e nunca às restrições: "contratar emprestimo" herda a jornada de
+        // crédito, mas não herda o veto de inadimplência do produto. Restrição
+        // é decisão de quem cura, e ninguém curou este termo.
+        doc.setField("jornada_s", termo.jornada());
         doc.setField("produto_alvo_s", "");
         doc.setField("rotulo_s", "");
         doc.setField("destino_s", "/busca?q=" + chave.replace(' ', '+'));

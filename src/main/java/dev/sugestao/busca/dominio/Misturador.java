@@ -18,12 +18,18 @@ import java.util.Map;
  * <p>Tudo o que fica de fora sai registrado em {@link Descarte}. Numa camada de
  * sugestão, a pergunta que chega do negócio quase nunca é por que uma linha
  * apareceu — é por que a outra não apareceu.
+ *
+ * <p>Esta classe <strong>não pontua</strong>. Ela recebe os candidatos já
+ * ranqueados pelo {@link Rankeador} e só decide quem cabe. Misturar e pontuar
+ * eram a mesma classe até a normalização de escala precisar conviver com o peso
+ * de jornada e o de afinidade — três regras de ordenação dentro de quem também
+ * aplica cota é onde se perde a conta de qual delas moveu a linha.
  */
 public final class Misturador {
 
     public Mistura misturar(List<Candidato> candidatos, Cotas cotas) {
         var descartes = new ArrayList<Descarte>();
-        List<Candidato> unicos = deduplicar(normalizar(candidatos), descartes);
+        List<Candidato> unicos = deduplicar(candidatos, descartes);
 
         var escolhidos = new ArrayList<Candidato>(cotas.limite());
 
@@ -64,26 +70,6 @@ public final class Misturador {
         }
 
         return new Mistura(escolhidos, descartes);
-    }
-
-    /**
-     * Score do Solr e score do histórico não nascem na mesma escala, e sem isto
-     * a comparação entre eles seria acidente de magnitude. Só o que veio do
-     * índice é reescalado; o histórico já chega entre 0 e 1.
-     */
-    private List<Candidato> normalizar(List<Candidato> candidatos) {
-        double maior = candidatos.stream()
-                .filter(c -> c.origem().veioDoIndice())
-                .mapToDouble(Candidato::relevancia)
-                .max()
-                .orElse(0.0);
-
-        if (maior <= 0.0) {
-            return candidatos;
-        }
-        return candidatos.stream()
-                .map(c -> c.origem().veioDoIndice() ? c.com(c.relevancia() / maior) : c)
-                .toList();
     }
 
     private List<Candidato> deduplicar(List<Candidato> candidatos, List<Descarte> descartes) {

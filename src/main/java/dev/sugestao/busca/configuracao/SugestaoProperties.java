@@ -32,6 +32,8 @@ public record SugestaoProperties(
          */
         boolean explicacaoHabilitada,
 
+        Peso peso,
+
         Aprendizado aprendizado) {
 
     public record Solr(String baseUrl, String colecao) { }
@@ -40,6 +42,17 @@ public record SugestaoProperties(
 
     /** Teto por origem na lista final. Sem cota, a lista colapsa na origem mais popular. */
     public record Cota(int historico, int evento) { }
+
+    /**
+     * Os multiplicadores do ranking. Sao multiplicadores e nao somas: somar
+     * faria o peso depender da escala do score do Solr, que muda com o tamanho
+     * do indice e com o prefixo digitado.
+     */
+    public record Peso(
+            double jornadaLider,
+            double produtoDaJornada,
+            double afinidadeMaxima,
+            double margemParaLiderar) { }
 
     /**
      * O caminho de escrita. Nada aqui esta no orcamento de 30 ms: sao os

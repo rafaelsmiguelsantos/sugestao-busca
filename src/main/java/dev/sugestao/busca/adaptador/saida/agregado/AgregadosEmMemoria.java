@@ -5,7 +5,6 @@ import dev.sugestao.busca.dominio.Normalizacao;
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
-import dev.sugestao.busca.dominio.evento.TipoDeEvento;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -88,6 +87,17 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         return resultado;
     }
 
+    /**
+     * Clicar pesa, contratar pesa mais, buscar não pesa.
+     *
+     * <p>Busca é declaração de dúvida e já está representada no histórico;
+     * transformá-la em afinidade faria quem procura entender um produto ser
+     * tratado como quem o quer. Contratação vale mais que clique porque é o
+     * único destes sinais que o negócio reconhece como resultado.
+     */
+    private static final double PESO_DO_CLIQUE = 2.0;
+    private static final double PESO_DA_ADESAO = 5.0;
+
     @Override
     public List<ComportamentoDoCliente> comportamentos(Duration janela, int tamanhoDoHistorico) {
         Instant corte = Instant.now().minus(janela);
@@ -96,27 +106,78 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         // mais recente para o mais antigo: quem repete uma busca mantém a
         // posição da vez mais recente, não da primeira.
         Map<String, LinkedHashSet<String>> historicos = new HashMap<>();
+        Map<String, Map<String, Double>> afinidades = new HashMap<>();
 
         var reverso = eventos.descendingIterator();
         while (reverso.hasNext()) {
             EventoDeBusca evento = reverso.next();
-            if (evento.ocorridoEm().isBefore(corte) || evento.tipo() != TipoDeEvento.BUSCA_DIGITADA) {
+            if (evento.ocorridoEm().isBefore(corte)) {
                 continue;
             }
-            historicos.computeIfAbsent(evento.clienteId(), c -> new LinkedHashSet<>())
-                    .add(evento.termo());
+
+            switch (evento.tipo()) {
+                case BUSCA_DIGITADA -> historicos
+                        .computeIfAbsent(evento.clienteId(), c -> new LinkedHashSet<>())
+                        .add(evento.termo());
+
+                case SUGESTAO_CLICADA -> somarAfinidade(
+                        afinidades, evento.clienteId(), evento.jornada(), PESO_DO_CLIQUE);
+
+                case ADESAO -> somarAfinidade(
+                        afinidades, evento.clienteId(), evento.jornada(), PESO_DA_ADESAO);
+
+                default -> { }
+            }
         }
 
-        var resultado = new ArrayList<ComportamentoDoCliente>(historicos.size());
-        historicos.forEach((cliente, termos) -> resultado.add(new ComportamentoDoCliente(
-                cliente,
-                termos.stream().limit(tamanhoDoHistorico).toList(),
-                // Gatilho não nasce de busca. Pix recusado, fatura alta e
-                // acesso suspeito vêm de outros produtores, que este POC não
-                // modela — por isso esta lista sai vazia e o escritor de perfil
-                // preserva os gatilhos que já existiam.
-                Set.of())));
+        var clientes = new LinkedHashSet<String>(historicos.keySet());
+        clientes.addAll(afinidades.keySet());
+
+        var resultado = new ArrayList<ComportamentoDoCliente>(clientes.size());
+        for (String cliente : clientes) {
+            var termos = historicos.getOrDefault(cliente, new LinkedHashSet<>());
+            resultado.add(new ComportamentoDoCliente(
+                    cliente,
+                    termos.stream().limit(tamanhoDoHistorico).toList(),
+                    // Gatilho não nasce de busca. Pix recusado, fatura alta e
+                    // acesso suspeito vêm de outros produtores, que este POC não
+                    // modela — por isso esta lista sai vazia e o escritor de
+                    // perfil preserva os gatilhos que já existiam.
+                    Set.of(),
+                    normalizada(afinidades.get(cliente))));
+        }
         return resultado;
+    }
+
+    private static void somarAfinidade(
+            Map<String, Map<String, Double>> afinidades, String cliente, String jornada, double peso) {
+
+        if (jornada == null || jornada.isBlank()) {
+            return;
+        }
+        afinidades.computeIfAbsent(cliente, c -> new HashMap<>())
+                .merge(jornada, peso, Double::sum);
+    }
+
+    /**
+     * Divide pela jornada mais forte da própria pessoa, não por um máximo
+     * global. Afinidade é relativa a ela mesma: quem só mexeu em crédito tem
+     * afinidade 1 com crédito, ainda que tenha clicado três vezes e outro
+     * cliente trezentas. Normalizar contra a população transformaria esta
+     * medida num segundo índice de popularidade, que já existe no {@code ctr}.
+     */
+    private static Map<String, Double> normalizada(Map<String, Double> brutos) {
+        if (brutos == null || brutos.isEmpty()) {
+            return Map.of();
+        }
+        double maior = brutos.values().stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        if (maior <= 0) {
+            return Map.of();
+        }
+
+        var escalada = new HashMap<String, Double>(brutos.size());
+        brutos.forEach((jornada, peso) -> escalada.put(jornada, peso / maior));
+        return Map.copyOf(escalada);
     }
 
     @Override

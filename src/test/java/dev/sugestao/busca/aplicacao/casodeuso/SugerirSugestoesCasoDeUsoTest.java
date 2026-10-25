@@ -15,6 +15,7 @@ import dev.sugestao.busca.dominio.MotivoDeDescarte;
 import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Peneira;
+import dev.sugestao.busca.dominio.Rankeador;
 import dev.sugestao.busca.dominio.Perfil;
 import dev.sugestao.busca.dominio.Restricoes;
 import dev.sugestao.busca.dominio.Segmento;
@@ -233,7 +234,7 @@ class SugerirSugestoesCasoDeUsoTest {
             CatalogoDeSugestoes catalogo, RepositorioDePerfil perfis, ParametrosDeSugestao parametros) {
         return new SugerirSugestoesCasoDeUso(
                 catalogo, perfis, new ClassificadorDeOrigem(), new Peneira(30),
-                new Misturador(), parametros);
+                new Rankeador(), new Misturador(), parametros);
     }
 
     private static Candidato popular(String termo) {

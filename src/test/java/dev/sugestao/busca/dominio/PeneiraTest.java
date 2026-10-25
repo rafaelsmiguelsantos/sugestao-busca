@@ -110,6 +110,23 @@ class PeneiraTest {
     }
 
     @Test
+    @DisplayName("promover a evento não isenta do piso: o evento é candidato do índice, promovido")
+    void eventoTambemRespondePeloPiso() {
+        // Regressão. Enquanto EVENTO não contava como vindo do índice, um
+        // termo abaixo do piso que casasse com um gatilho era promovido antes
+        // da Peneira e passava direto pela rede de segurança — indo parar na
+        // primeira linha, que é a vaga reservada ao evento.
+        var promovido = new Candidato("adiantamento para maria silva", "", "/busca", "credito", "",
+                Restricoes.NENHUMA, List.of("pix_recusado_72h"), 2, 1.0, Origem.EVENTO);
+
+        var peneirada = peneira.aplicar(List.of(promovido), Perfil.NEUTRO);
+
+        assertThat(peneirada.sobreviventes()).isEmpty();
+        assertThat(peneirada.descartes()).singleElement()
+                .extracting(Descarte::motivo).isEqualTo(MotivoDeDescarte.ABAIXO_DO_PISO);
+    }
+
+    @Test
     @DisplayName("o piso não se aplica ao histórico: o dono recebendo o próprio dado não é vazamento")
     void historicoNaoRespondePeloPiso() {
         // Zero clientes distintos: ninguém mais digitou isto, e é exatamente

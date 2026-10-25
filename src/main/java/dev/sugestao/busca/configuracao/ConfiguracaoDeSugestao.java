@@ -5,6 +5,7 @@ import dev.sugestao.busca.adaptador.saida.agregado.AgregadosEmMemoria;
 import dev.sugestao.busca.adaptador.saida.fila.FilaEmMemoria;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisEmMemoria;
+import dev.sugestao.busca.adaptador.saida.solr.CatalogoCuradoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.ConsultaDeCandidatos;
 import dev.sugestao.busca.adaptador.saida.solr.PublicadorSolr;
@@ -17,6 +18,7 @@ import dev.sugestao.busca.aplicacao.casodeuso.SugerirSugestoesCasoDeUso;
 import dev.sugestao.busca.aplicacao.porta.entrada.AprenderComComportamento;
 import dev.sugestao.busca.aplicacao.porta.entrada.RegistrarEventos;
 import dev.sugestao.busca.aplicacao.porta.entrada.SugerirSugestoes;
+import dev.sugestao.busca.aplicacao.porta.saida.CatalogoCurado;
 import dev.sugestao.busca.aplicacao.porta.saida.CatalogoDeSugestoes;
 import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
 import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
@@ -27,6 +29,8 @@ import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
 import dev.sugestao.busca.dominio.Cotas;
 import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Peneira;
+import dev.sugestao.busca.dominio.PesosDeRanking;
+import dev.sugestao.busca.dominio.Rankeador;
 import dev.sugestao.busca.dominio.evento.Saneador;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
@@ -129,16 +133,24 @@ public class ConfiguracaoDeSugestao {
     }
 
     @Bean
+    public Rankeador rankeador() {
+        return new Rankeador();
+    }
+
+    @Bean
     public Misturador misturador() {
         return new Misturador();
     }
 
     @Bean
     public ParametrosDeSugestao parametrosDeSugestao(SugestaoProperties props) {
+        var p = props.peso();
         return new ParametrosDeSugestao(
                 props.prefixoMinimo(),
                 props.candidatosSolr(),
                 new Cotas(props.cota().historico(), props.cota().evento(), props.resultadoMaximo()),
+                new PesosDeRanking(p.jornadaLider(), p.produtoDaJornada(),
+                        p.afinidadeMaxima(), p.margemParaLiderar()),
                 Prazos.de(props.prazo().solrMs(), props.prazo().perfilMs(), props.prazo().totalMs()));
     }
 
@@ -148,11 +160,12 @@ public class ConfiguracaoDeSugestao {
             RepositorioDePerfil perfis,
             ClassificadorDeOrigem classificador,
             Peneira peneira,
+            Rankeador rankeador,
             Misturador misturador,
             ParametrosDeSugestao parametros) {
 
         return new SugerirSugestoesCasoDeUso(
-                catalogo, perfis, classificador, peneira, misturador, parametros);
+                catalogo, perfis, classificador, peneira, rankeador, misturador, parametros);
     }
 
     // -----------------------------------------------------------------------
@@ -181,6 +194,12 @@ public class ConfiguracaoDeSugestao {
     }
 
     @Bean
+    public CatalogoCurado catalogoCurado(
+            @Qualifier("solrDePublicacao") SolrClient solr, SugestaoProperties props) {
+        return new CatalogoCuradoSolr(solr, props.solr().colecao());
+    }
+
+    @Bean
     public ParametrosDeAprendizado parametrosDeAprendizado(SugestaoProperties props) {
         var a = props.aprendizado();
         return new ParametrosDeAprendizado(
@@ -200,12 +219,13 @@ public class ConfiguracaoDeSugestao {
     public AprenderComComportamento aprenderComComportamento(
             FilaDeEventos fila,
             RepositorioDeAgregados agregados,
+            CatalogoCurado catalogoCurado,
             PublicadorDeVocabulario publicador,
             EscritorDePerfil perfis,
             ParametrosDeAprendizado parametros) {
 
         return new AprenderComComportamentoCasoDeUso(
-                fila, agregados, publicador, perfis, parametros);
+                fila, agregados, catalogoCurado, publicador, perfis, parametros);
     }
 
     @Bean

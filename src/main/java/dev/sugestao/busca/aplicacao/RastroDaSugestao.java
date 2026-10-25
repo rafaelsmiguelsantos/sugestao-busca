@@ -30,6 +30,10 @@ public record RastroDaSugestao(
         int candidatosDoIndice,
         int candidatosDoHistorico,
         int promovidosAEvento,
+
+        /** A jornada que o prefixo revelou, ou vazio quando nenhuma dominou. */
+        String jornadaLider,
+
         List<Descarte> descartes,
         List<Linha> linhas) {
 
@@ -54,9 +58,10 @@ public record RastroDaSugestao(
 
     /** Uma linha de log legível, para quando o rastro vai para o console. */
     public String resumo() {
-        return "q='%s' -> '%s' | cliente=%s/%s perfil=%s | indice=%d hist=%d evento=%d | descartes=%d | linhas=%d | %dms (indice %dms, perfil %dms)"
+        return "q='%s' -> '%s' | cliente=%s/%s perfil=%s | indice=%d hist=%d evento=%d | jornada=%s | descartes=%d | linhas=%d | %dms (indice %dms, perfil %dms)"
                 .formatted(prefixoDigitado, prefixoNormalizado, clienteId, segmento, perfil,
                         candidatosDoIndice, candidatosDoHistorico, promovidosAEvento,
+                        jornadaLider.isBlank() ? "-" : jornadaLider,
                         descartes.size(), linhas.size(), msTotal, msAteIndice, msAtePerfil);
     }
 }

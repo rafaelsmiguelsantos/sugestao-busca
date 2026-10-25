@@ -3,10 +3,12 @@ package dev.sugestao.busca.aplicacao.casodeuso;
 import dev.sugestao.busca.adaptador.saida.agregado.AgregadosEmMemoria;
 import dev.sugestao.busca.adaptador.saida.fila.FilaEmMemoria;
 import dev.sugestao.busca.aplicacao.ParametrosDeAprendizado;
+import dev.sugestao.busca.aplicacao.porta.saida.CatalogoCurado;
 import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
 import dev.sugestao.busca.aplicacao.porta.saida.PublicadorDeVocabulario;
 import dev.sugestao.busca.dominio.Segmento;
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
+import dev.sugestao.busca.dominio.agregado.ItemCurado;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 import dev.sugestao.busca.dominio.evento.Saneador;
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * O caminho de escrita de ponta a ponta, sem Solr e sem Spring: ingestão,
@@ -36,8 +39,14 @@ class CaminhoDeEscritaTest {
     private final RegistrarEventosCasoDeUso ingestao =
             new RegistrarEventosCasoDeUso(fila, new Saneador());
 
+    /** Régua mínima: só o que a classificação de jornada precisa enxergar. */
+    private final CatalogoCurado catalogo = () -> List.of(
+            new ItemCurado("CDB", List.of("cdb", "renda fixa", "aplicar dinheiro"), "investimento"),
+            new ItemCurado("empréstimo pessoal", List.of("emprestimo", "credito pessoal"), "credito"),
+            new ItemCurado("pagar boleto", List.of("boleto", "codigo de barras"), "conta"));
+
     private final AprenderComComportamentoCasoDeUso aprendizado =
-            new AprenderComComportamentoCasoDeUso(fila, agregados, publicador, perfis,
+            new AprenderComComportamentoCasoDeUso(fila, agregados, catalogo, publicador, perfis,
                     ParametrosDeAprendizado.padrao(PISO));
 
     @Test
@@ -157,7 +166,85 @@ class CaminhoDeEscritaTest {
                         .containsExactlyInAnyOrder("pagar boleto", "limite do pix"));
     }
 
+    @Test
+    @DisplayName("o termo aprendido herda a jornada do catálogo, e é isso que o ranking alcança")
+    void termoAprendidoGanhaJornada() {
+        ingestao.executar(eventosDeClientesDistintos("contratar cdb", 30));
+        ingestao.executar(eventosDeClientesDistintos("simular emprestimo", 30));
+
+        aprendizado.executar();
+
+        // Sem isto os dois sairiam como 'busca', e nem o peso de jornada nem a
+        // afinidade do cliente os alcançariam — a personalização valeria só
+        // para as linhas de catálogo, que são a minoria da lista.
+        assertThat(publicador.publicados)
+                .extracting(TermoAgregado::termo, TermoAgregado::jornada)
+                .contains(
+                        tuple("contratar cdb", "investimento"),
+                        tuple("simular emprestimo", "credito"));
+    }
+
+    @Test
+    @DisplayName("termo que não casa com nenhuma jornada fica no balde, e isso não piora nada")
+    void termoAmbiguoFicaEmBusca() {
+        ingestao.executar(eventosDeClientesDistintos("alterar cadastro", 30));
+
+        aprendizado.executar();
+
+        assertThat(publicador.publicados).singleElement()
+                .extracting(TermoAgregado::jornada).isEqualTo("busca");
+    }
+
+    @Test
+    @DisplayName("clique e contratação viram afinidade de jornada; busca sozinha não vira")
+    void afinidadeVemDeCliqueEAdesao() {
+        ingestao.executar(List.of(
+                // Buscar é declarar dúvida. Se isto virasse afinidade, quem
+                // procura entender um produto seria tratado como quem o quer.
+                comJornada(TipoDeEvento.BUSCA_DIGITADA, "c-1", "o que e cet", "ajuda"),
+                comJornada(TipoDeEvento.SUGESTAO_CLICADA, "c-1", "empréstimo pessoal", "credito"),
+                comJornada(TipoDeEvento.ADESAO, "c-1", "empréstimo pessoal", "credito"),
+                comJornada(TipoDeEvento.SUGESTAO_CLICADA, "c-1", "CDB", "investimento")));
+
+        aprendizado.executar();
+
+        var c1 = perfis.recebidos.stream()
+                .filter(c -> c.clienteId().equals("c-1")).findFirst().orElseThrow();
+
+        // credito = clique(2) + adesão(5) = 7; investimento = clique(2).
+        // Normalizado pela jornada mais forte DELE, não por um máximo global.
+        assertThat(c1.afinidadePorJornada()).containsOnlyKeys("credito", "investimento");
+        assertThat(c1.afinidadePorJornada().get("credito")).isEqualTo(1.0);
+        assertThat(c1.afinidadePorJornada().get("investimento")).isEqualTo(2.0 / 7.0);
+        assertThat(c1.afinidadePorJornada()).doesNotContainKey("ajuda");
+    }
+
+    @Test
+    @DisplayName("a afinidade de um cliente não contamina a de outro")
+    void afinidadeNaoVazaEntreClientes() {
+        ingestao.executar(List.of(
+                comJornada(TipoDeEvento.ADESAO, "c-1", "empréstimo pessoal", "credito"),
+                comJornada(TipoDeEvento.ADESAO, "c-2", "CDB", "investimento")));
+
+        aprendizado.executar();
+
+        assertThat(perfis.recebidos).hasSize(2);
+        assertThat(porCliente("c-1").afinidadePorJornada()).containsOnlyKeys("credito");
+        assertThat(porCliente("c-2").afinidadePorJornada()).containsOnlyKeys("investimento");
+    }
+
     // -----------------------------------------------------------------------
+
+    private ComportamentoDoCliente porCliente(String id) {
+        return perfis.recebidos.stream()
+                .filter(c -> c.clienteId().equals(id)).findFirst().orElseThrow();
+    }
+
+    private static EventoDeBusca comJornada(
+            TipoDeEvento tipo, String cliente, String termo, String jornada) {
+        return new EventoDeBusca(tipo, cliente, Segmento.PF, termo, List.of(),
+                -1, "", jornada, false, Instant.now());
+    }
 
     private static List<EventoDeBusca> eventosDeClientesDistintos(String termo, int quantos) {
         var eventos = new ArrayList<EventoDeBusca>(quantos);

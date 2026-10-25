@@ -3,10 +3,12 @@ package dev.sugestao.busca.aplicacao.casodeuso;
 import dev.sugestao.busca.aplicacao.ParametrosDeAprendizado;
 import dev.sugestao.busca.aplicacao.porta.entrada.AprenderComComportamento;
 import dev.sugestao.busca.aplicacao.porta.entrada.ResultadoDoAprendizado;
+import dev.sugestao.busca.aplicacao.porta.saida.CatalogoCurado;
 import dev.sugestao.busca.aplicacao.porta.saida.EscritorDePerfil;
 import dev.sugestao.busca.aplicacao.porta.saida.FilaDeEventos;
 import dev.sugestao.busca.aplicacao.porta.saida.PublicadorDeVocabulario;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
+import dev.sugestao.busca.dominio.agregado.ClassificadorDeJornada;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 
 import java.util.ArrayList;
@@ -32,6 +34,7 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
 
     private final FilaDeEventos fila;
     private final RepositorioDeAgregados agregados;
+    private final CatalogoCurado catalogoCurado;
     private final PublicadorDeVocabulario publicador;
     private final EscritorDePerfil perfis;
     private final ParametrosDeAprendizado parametros;
@@ -39,11 +42,13 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
     public AprenderComComportamentoCasoDeUso(
             FilaDeEventos fila,
             RepositorioDeAgregados agregados,
+            CatalogoCurado catalogoCurado,
             PublicadorDeVocabulario publicador,
             EscritorDePerfil perfis,
             ParametrosDeAprendizado parametros) {
         this.fila = fila;
         this.agregados = agregados;
+        this.catalogoCurado = catalogoCurado;
         this.publicador = publicador;
         this.perfis = perfis;
         this.parametros = parametros;
@@ -56,12 +61,18 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
 
         var termos = agregados.termos(parametros.janelaDoVocabulario());
 
+        // A régua é lida uma vez por rodada, não por termo. Classificar aqui, e
+        // não na leitura, é o que permite ao ranking por jornada e ao ranking
+        // por comportamento alcançarem a camada popular — sem isso os dois
+        // valem só para as linhas de catálogo, que são a minoria da lista.
+        var classificador = new ClassificadorDeJornada(catalogoCurado.itens());
+
         var publicaveis = new ArrayList<TermoAgregado>(termos.size());
         var retidos = new ArrayList<String>();
 
         for (TermoAgregado termo : termos) {
             if (termo.acimaDoPiso(parametros.kAnonimatoMinimo())) {
-                publicaveis.add(termo);
+                publicaveis.add(termo.classificadoComo(classificador.classificar(termo.termo())));
             } else {
                 retidos.add(termo.termo());
             }

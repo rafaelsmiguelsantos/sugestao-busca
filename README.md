@@ -176,6 +176,64 @@ A resposta da ingestão **não devolve o termo barrado**, só a contagem por
 motivo. Devolvê-lo recriaria no corpo da resposta — e no log de quem o
 imprimisse — exatamente o vazamento que o portão acabou de impedir.
 
+### Como a ordem é decidida
+
+Três sinais multiplicativos em cima do score do índice. **Todos só promovem** —
+para rebaixar existe a `Peneira`, que também devolve o motivo.
+
+| sinal | o que responde | peso |
+|---|---|---|
+| escala | põe score do Solr e score do histórico na mesma régua | — |
+| jornada líder | qual intenção o prefixo revela, e o produto dela lidera | 1.6 × 1.25 |
+| afinidade | o que **esta pessoa** faz, não o que a população faz | até 1.5 |
+
+A **jornada líder** é a que domina os candidatos, desde que supere a segunda por
+15%. Empate não elege ninguém: "limite" serve a cartão e a Pix, e escolher um por
+diferença de terceira casa decimal é inventar uma intenção. `busca` nunca lidera
+— não é jornada, é o balde do log.
+
+```
+q='emprestim'  →  jornada 'credito'
+   0. [CATALOGO] empréstimo pessoal        ← o produto
+   1. [POPULAR ] contratar emprestimo
+```
+
+A **afinidade** é o ranking por comportamento, e é diferente do `ctr` e da
+`taxa_adesao` que já estão no `boost` do Solr: aqueles são agregados da
+população. Ela vem de clique e contratação do próprio cliente — buscar não conta,
+porque buscar é declarar dúvida, e quem procura entender um produto não é quem o
+quer. Normaliza contra a jornada mais forte **da própria pessoa**, não contra um
+máximo global; normalizar contra a população criaria um segundo índice de
+popularidade, que já existe.
+
+Quando nenhuma jornada lidera, o comportamento decide sozinho:
+
+```
+q='contratar'   (jornada líder: nenhuma)
+pf-novo            pf-pix-recusado       pf-uniclass          pf-negativado
+(sem afinidade)    (crédito 1.0)         (investimento 1.0)   (renegociação 1.0,
+                                                               cartão 0.5)
+contratar cartao   contratar emprestimo  contratar cdb        contratar cartao
+contratar seguro   contratar cartao      contratar cartao     contratar seguro
+contratar empr...  contratar seguro      contratar seguro     contratar empr...
+contratar cdb      contratar cdb         contratar empr...    contratar cdb
+```
+
+Para que isso alcançasse a camada popular, o termo vindo do log precisou ganhar
+jornada. Ele nasce sem nenhuma — ninguém o curou — e os dois sinais são chaveados
+por jornada, então sem isso a personalização seria decorativa, valendo só para as
+linhas de catálogo. A publicação classifica cada termo aprendido cruzando suas
+palavras com as do catálogo curado, com a mesma regra de margem: na dúvida fica
+em `busca`, que é onde ele estava antes.
+
+A jornada herdada serve ao **ranking** e nunca às **restrições**: `contratar
+emprestimo` herda crédito, mas não herda o veto de inadimplência do produto.
+Restrição é decisão de quem cura, e ninguém curou esse termo.
+
+O risco conhecido é a bolha — afinidade reforça afinidade. O teto de 1.5 e a cota
+do `Misturador` são o que seguram isso: a cota garante que a lista continue
+mostrando caminhos que o ranking sozinho teria enterrado.
+
 ### Ver a decisão por dentro
 
 ```powershell
@@ -194,9 +252,17 @@ Numa camada de sugestão a pergunta que chega do negócio quase nunca é por que
 uma linha apareceu — é por que a outra não apareceu. O rastro responde isso, e
 sai em `DEBUG` a cada requisição mesmo sem o parâmetro.
 
-**`sugestao.explicacao-habilitada` fica desligado em produção.** A lista de
-descartes diz quais produtos o cliente não pode contratar, e isso é informação
-sobre a pessoa, não sobre a busca.
+**O `?explicar=true` só funciona no perfil `local`.** No `application.properties`
+versionado ele é `false`, junto com o gatilho manual do aprendizado:
+
+```powershell
+.\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
+```
+
+O default que viaja no repositório é o seguro. Um comentário dizendo "desligar em
+produção" ao lado de um default ligado protege quem lê o arquivo, não quem faz
+deploy sem ler. O perfil `local` também afrouxa os prazos para 250/100/400 ms, de
+modo que a demonstração não dependa de o Solr estar aquecido.
 
 ## Estrutura
 
@@ -213,10 +279,12 @@ src/main/java/dev/sugestao/busca/
 │   ├── Perfil, SituacaoDaConta    comportamento e estado de conta
 │   ├── ClassificadorDeOrigem  gatilho ativo promove candidato a EVENTO
 │   ├── Peneira                o que o perfil tira depois que o índice respondeu
+│   ├── Rankeador, PesosDeRanking   escala, jornada lider, afinidade
 │   ├── Misturador             dedup, cota, limite
 │   ├── Descarte               por que cada candidato ficou de fora
 │   ├── evento/Saneador        o portão de PII, na ingestão
-│   └── agregado/              TermoAgregado, ComportamentoDoCliente
+│   └── agregado/              TermoAgregado, ComportamentoDoCliente,
+│                               ClassificadorDeJornada
 │
 ├── aplicacao/
 │   ├── porta/entrada/         SugerirSugestoes, RegistrarEventos,
@@ -339,6 +407,12 @@ agregação falhar depois. As três propriedades que faltam são exatamente as q
 justificam existir um MSK no desenho. O que ela preserva é a *forma* — publicar e
 consumir são as mesmas duas chamadas, e trocar é escrever outro adaptador.
 
+**O índice não é reproduzível só pelo repositório.** O `semear-vocabulario.ps1`
+regenera o vocabulário curado; os termos que o sistema *aprendeu* em execução
+não. Rodar `-Limpar` apaga os dois tipos e só o primeiro volta. É consequência
+esperada de existir um caminho de escrita — o índice passa a ter estado que o
+git não tem —, mas vale saber antes de limpar achando que é idempotente.
+
 ### Duas perguntas em aberto
 
 **1. O histórico não passa pelo filtro de elegibilidade.** Ele não é uma oferta:
@@ -348,12 +422,14 @@ histórico, embora a de catálogo tenha sumido. Apagar o histórico de alguém p
 inelegibilidade e levar alguém a uma porta fechada são dois erros diferentes, e
 qual deles é pior é decisão de negócio, não de código.
 
-**2. Termo vindo do log não carrega restrição.** O catálogo declara
-`veta_inadimplencia_b` e `exige_conta_ativa_b`; termo publicado a partir de busca
-não declara nada, porque ninguém o curou. Na prática: um cliente inadimplente não
-recebe a oferta `empréstimo pessoal`, mas continua recebendo `contratar
-emprestimo` — que veio do log e leva a uma página de busca, não a uma proposta.
-Defensável enquanto o destino for busca; deixa de ser no dia em que a camada
-popular ganhar deep link. O conserto seria a agregação classificar o termo numa
-jornada e herdar as restrições dela, e isso é trabalho de curadoria, não de
-código.
+**2. Termo vindo do log herda jornada, mas não herda restrição.** A publicação
+já classifica o termo aprendido numa jornada, e é isso que faz o ranking alcançar
+a camada popular. As restrições continuam de fora, de propósito: um cliente
+inadimplente não recebe a oferta `empréstimo pessoal`, mas continua recebendo
+`contratar emprestimo`, que leva a uma página de busca e não a uma proposta.
+
+Herdar o veto junto da jornada seria fácil e provavelmente errado — a mesma
+inferência que acerta "contratar emprestimo" vai errar em algum termo, e errar
+numa restrição significa esconder da pessoa uma busca que ela tinha o direito de
+fazer. Restrição é decisão de quem cura. Isto deixa de ser defensável no dia em
+que a camada popular ganhar deep link para dentro de uma jornada.

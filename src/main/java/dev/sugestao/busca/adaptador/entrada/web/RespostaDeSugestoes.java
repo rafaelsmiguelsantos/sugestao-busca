@@ -37,6 +37,7 @@ public record RespostaDeSugestoes(
     public record Explicacao(
             String prefixoNormalizado,
             String perfil,
+            String jornadaLider,
             long msTotal,
             long msAteIndice,
             long msAtePerfil,
@@ -78,6 +79,7 @@ public record RespostaDeSugestoes(
         return new Explicacao(
                 rastro.prefixoNormalizado(),
                 rastro.perfil().name(),
+                rastro.jornadaLider(),
                 rastro.msTotal(),
                 rastro.msAteIndice(),
                 rastro.msAtePerfil(),

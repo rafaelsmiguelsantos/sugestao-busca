@@ -66,6 +66,11 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
                 atual.produtosContratados(),
                 atual.elegibilidades(),
                 atual.situacaoDaConta(),
+                // Afinidade é comportamento de busca, então esta é a fonte dela
+                // e pode sobrescrever. A janela é curta de propósito: interesse
+                // que parou de ser demonstrado precisa poder esfriar, senão um
+                // clique de três semanas atrás inclina a lista para sempre.
+                novo.afinidadePorJornada(),
                 true);
     }
 
@@ -79,6 +84,7 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
                 // conhecida, e o lado seguro disso é DESCONHECIDA: a oferta
                 // condicionada não aparece até alguém que saiba dizer.
                 SituacaoDaConta.DESCONHECIDA,
+                comportamento.afinidadePorJornada(),
                 true);
     }
 }

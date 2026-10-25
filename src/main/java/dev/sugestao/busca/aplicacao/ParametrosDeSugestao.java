@@ -1,6 +1,7 @@
 package dev.sugestao.busca.aplicacao;
 
 import dev.sugestao.busca.dominio.Cotas;
+import dev.sugestao.busca.dominio.PesosDeRanking;
 
 /**
  * Tudo o que o desenho chama de "parâmetro", reunido num valor só. Fica aqui, e
@@ -12,7 +13,13 @@ public record ParametrosDeSugestao(
         int prefixoMinimo,
         int candidatosDoIndice,
         Cotas cotas,
+        PesosDeRanking pesos,
         Prazos prazos) {
+
+    /** Sem pesos declarados, usa os padrão. Conveniência para teste. */
+    public ParametrosDeSugestao(int prefixoMinimo, int candidatosDoIndice, Cotas cotas, Prazos prazos) {
+        this(prefixoMinimo, candidatosDoIndice, cotas, PesosDeRanking.padrao(), prazos);
+    }
 
     public ParametrosDeSugestao {
         if (prefixoMinimo < 1) {

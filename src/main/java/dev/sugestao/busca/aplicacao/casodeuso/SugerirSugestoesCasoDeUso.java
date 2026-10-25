@@ -19,6 +19,7 @@ import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Peneira;
 import dev.sugestao.busca.dominio.Perfil;
 import dev.sugestao.busca.dominio.Prefixo;
+import dev.sugestao.busca.dominio.Rankeador;
 import dev.sugestao.busca.dominio.Restricoes;
 
 import java.time.Duration;
@@ -49,6 +50,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
     private final RepositorioDePerfil perfis;
     private final ClassificadorDeOrigem classificador;
     private final Peneira peneira;
+    private final Rankeador rankeador;
     private final Misturador misturador;
     private final ParametrosDeSugestao parametros;
 
@@ -57,12 +59,14 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
             RepositorioDePerfil perfis,
             ClassificadorDeOrigem classificador,
             Peneira peneira,
+            Rankeador rankeador,
             Misturador misturador,
             ParametrosDeSugestao parametros) {
         this.catalogo = catalogo;
         this.perfis = perfis;
         this.classificador = classificador;
         this.peneira = peneira;
+        this.rankeador = rankeador;
         this.misturador = misturador;
         this.parametros = parametros;
     }
@@ -131,7 +135,15 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         todos.addAll(doHistorico);
 
         var peneirada = peneira.aplicar(todos, perfil);
-        var mistura = misturador.misturar(peneirada.sobreviventes(), parametros.cotas());
+
+        // Ranquear depois de peneirar: não há motivo para pontuar o que já foi
+        // removido, e a jornada líder seria eleita contando candidatos que não
+        // iam aparecer — uma jornada cheia de ofertas inelegíveis venceria sem
+        // ter uma única linha na tela.
+        var ranqueamento = rankeador.ranquear(
+                peneirada.sobreviventes(), perfil, parametros.pesos());
+
+        var mistura = misturador.misturar(ranqueamento.candidatos(), parametros.cotas());
 
         var descartes = new ArrayList<Descarte>(peneirada.descartes());
         descartes.addAll(mistura.descartes());
@@ -163,6 +175,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
                 indice.valor().size(),
                 doHistorico.size(),
                 promovidos,
+                ranqueamento.jornadaLider(),
                 descartes,
                 linhas);
 
@@ -186,7 +199,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
                 consulta.prefixoDigitado(), prefixo.valor(), cliente.id(), cliente.segmento(),
                 RastroDaSugestao.EstadoDoPerfil.SEM_PERFIL,
                 0, 0, decorridoEmMs(inicio),
-                0, 0, 0, List.of(), List.of());
+                0, 0, 0, "", List.of(), List.of());
     }
 
     /**

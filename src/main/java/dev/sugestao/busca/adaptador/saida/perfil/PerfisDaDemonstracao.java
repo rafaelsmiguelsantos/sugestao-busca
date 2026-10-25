@@ -40,14 +40,14 @@ public final class PerfisDaDemonstracao {
                         Set.of("pix_recusado_72h", "saldo_insuficiente_24h"),
                         Set.of(),
                         Set.of("ANTECIPACAO", "EMPRESTIMO", "LIMITE_CARTAO"),
-                        SituacaoDaConta.ATIVA, true),
+                        SituacaoDaConta.ATIVA, Map.of("credito", 1.0, "pix", 0.4), true),
 
                 // Já tem CDB. Digita "cdb" e não recebe de volta o que já
                 // comprou — corte de produto contratado, que vem do perfil.
                 "pf-investidor", new Perfil(
                         List.of("tesouro direto", "rendimento da poupanca", "cdb"),
                         Set.of(), Set.of("CDB"), Set.of("TESOURO", "LCI"),
-                        SituacaoDaConta.ATIVA, true),
+                        SituacaoDaConta.ATIVA, Map.of("investimento", 1.0), true),
 
                 // Elegibilidade de nada. Falha fechada funcionando: as ofertas
                 // que exigem elegibilidade somem, e só elas.
@@ -65,7 +65,7 @@ public final class PerfisDaDemonstracao {
                         Set.of("conta_negativa_30d", "fatura_alta_7d"),
                         Set.of(),
                         Set.of("EMPRESTIMO", "CONSIGNADO", "RENEGOCIACAO", "PARCELAMENTO_FATURA"),
-                        SituacaoDaConta.INADIMPLENTE, true),
+                        SituacaoDaConta.INADIMPLENTE, Map.of("renegociacao", 1.0, "cartao", 0.5), true),
 
                 // Conta bloqueada por suspeita de fraude. Operação que exige
                 // conta operante some; desbloquear e contestar continuam.
@@ -88,6 +88,6 @@ public final class PerfisDaDemonstracao {
                         List.of("cdb", "tesouro direto"),
                         Set.of(), Set.of(),
                         Set.of("TESOURO", "LCI", "FUNDO_EXCLUSIVO", "CONSULTORIA"),
-                        SituacaoDaConta.ATIVA, true));
+                        SituacaoDaConta.ATIVA, Map.of("investimento", 1.0), true));
     }
 }
