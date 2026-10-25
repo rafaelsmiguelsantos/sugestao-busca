@@ -8,7 +8,8 @@ real: o vocabulário é sintético e os perfis são falsos, em memória.
 
 ## O que já está instalado nesta máquina
 
-Tudo fora do `Program Files`, em pastas do usuário, sem privilégio de administrador.
+O projeto foi montado sem privilégio de administrador, e por isso tudo abaixo do
+Docker mora em pastas do usuário, fora do `Program Files`.
 
 | | versão | onde |
 |---|---|---|
@@ -16,6 +17,7 @@ Tudo fora do `Program Files`, em pastas do usuário, sem privilégio de administ
 | Apache Solr | 10.0.0 (com módulo `ltr`) | `C:\Users\migue\tools\solr-10.0.0` |
 | PortableGit | 2.56.0 | `C:\Users\migue\tools\PortableGit` |
 | Maven | via `mvnw`, baixado na primeira build | — |
+| Docker Desktop | 29.9.2, com WSL 2 | instalado em 24/10/2026 |
 
 O JDK 17 continua sendo o padrão do sistema. O Solr 10 exige Java 21+, então os
 scripts apontam o `SOLR_JAVA_HOME` para o JDK 25 apenas no processo que sobem.
@@ -40,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\solr-local.ps1 start
 
 ### Solr
 
-Hoje, do zip — não há runtime de container nesta máquina:
+Do zip, sem container e sem admin:
 
 ```powershell
 .\scripts\solr-local.ps1 start
@@ -60,31 +62,14 @@ Saúde em <http://localhost:8080/actuator/health>.
 
 ## Solr em Docker
 
-O `compose.yaml` está pronto e aponta para `solr:10.0.0` com o módulo `ltr`, na
-mesma porta e com a mesma coleção. Ele não roda ainda: **não há Docker, Podman nem
-WSL nesta máquina**, e habilitar qualquer um deles exige elevação, que não dá para
-fazer a partir daqui.
+**O Docker Desktop passou a existir nesta máquina em 24/10/2026** — servidor
+29.9.2, com WSL 2 e a distribuição `docker-desktop`. Até então não havia runtime
+de container nenhum aqui, e este README dizia isso; o `scripts/habilitar-docker.ps1`
+existe por causa daquele momento e **não é mais necessário**. Fica no repositório
+como o registro de um pré-requisito que já foi resolvido.
 
-Para habilitar, em um PowerShell **aberto como Administrador**:
-
-```powershell
-.\scripts\habilitar-docker.ps1
-```
-
-O script habilita a **Virtual Machine Platform** e o **WSL 2** — é exatamente o que
-o instalador do Docker Desktop reclama faltar. O usuário desta máquina é
-administrador local, então o UAC pede só confirmação, sem senha.
-
-Se o terminal elevado ainda estiver com a política `Restricted`, não vale a pena
-contornar por causa de um comando. O script inteiro se resume a isto, e dá para
-digitar direto:
-
-```powershell
-wsl --install --no-distribution
-```
-
-Depois: reiniciar, rodar de novo o instalador do Docker Desktop (**x86_64**, não o
-Arm), e então, de volta a um terminal normal:
+O `compose.yaml` aponta para `solr:10.0.0` com o módulo `ltr`, na mesma porta e
+com a mesma coleção:
 
 ```powershell
 docker compose up -d
@@ -93,7 +78,11 @@ docker compose up -d
 
 O `criar-colecao.ps1` é o mesmo nos dois caminhos — ele fala com `localhost:8983`
 e não sabe se do outro lado está o zip ou o container. Trocar de um para o outro
-não muda nada no projeto.
+não muda nada no projeto, mas **os dois não sobem juntos**: disputam a porta 8983.
+Antes de subir o container, `.\scripts\solr-local.ps1 stop`.
+
+Uma ressalva honesta: tudo o que está neste README foi verificado contra o Solr
+do zip. O caminho do container está escrito e nunca foi executado.
 
 ### Semear e conferir
 
@@ -250,8 +239,9 @@ src/main/java/dev/sugestao/busca/
 │
 └── configuracao/              o único lugar que sabe quem implementa cada porta
 
-compose.yaml                   Solr 10 em container (quando houver runtime)
+compose.yaml                   Solr 10 em container — escrito, nunca executado
 scripts/solr-local.ps1         Solr 10 do zip, sem container e sem admin
+scripts/habilitar-docker.ps1   obsoleto: o Docker já existe nesta máquina
 scripts/criar-colecao.ps1      cria a coleção e aplica o schema
 scripts/semear-vocabulario.ps1 vocabulário sintético
 scripts/conferir-piso.ps1      portão de publicação: k-anonimato e zero-resultado
