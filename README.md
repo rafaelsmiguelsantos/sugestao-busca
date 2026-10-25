@@ -49,11 +49,13 @@ A mesma letra, duas contas, e é aqui que o desenho se justifica:
 A segunda linha não é a API falhando: quem não pode contratar recebe a
 explicação, não a oferta. E `melhorOferta` ausente é **informação**, não erro.
 
-**Três formas de bater nos endpoints**, as mesmas chamadas:
+**Quatro formas de bater nos endpoints**, as mesmas chamadas:
 [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) (REST Client do VS
-Code), [`requisicoes/bater.ps1`](requisicoes/bater.ps1) (terminal) e
+Code), [`requisicoes/bater.ps1`](requisicoes/bater.ps1) (terminal),
+[`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json)
+(Postman, para clicar e explorar) e
 [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json)
-(Postman/newman, 44 asserções).
+(newman, 56 asserções).
 
 **As decisões de desenho, com o que foi recusado e por quê, estão em
 [`docs/decisoes.md`](docs/decisoes.md).**
@@ -170,22 +172,50 @@ não aparece em rede local: **resposta fora de ordem**, quando a resposta de
 
 ### Bater nos endpoints
 
-Duas formas, as mesmas chamadas. Não há tela: a evidência é a resposta.
+Quatro formas, as mesmas chamadas. Não há tela: a evidência é a resposta.
 
 **No VS Code** — [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http), com a
 extensão REST Client (`humao.rest-client`). Cada bloco separado por `###` ganha um
 link *Send Request*; `Ctrl+Alt+R` envia o bloco do cursor. Os blocos estão
 agrupados por pergunta, e cada um explica o que olhar na resposta.
 
-**Postman / newman** — [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json),
-com **44 asserções** sobre o contrato público. Roda sem instalar nada permanente:
+**No Postman, para clicar e explorar** —
+[`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json).
+`File > Import` e pronto: **36 requisições em 7 pastas**, cada uma com uma
+descrição em markdown dizendo o que olhar na resposta. Não pede token: um
+`prerequest` de collection assina os JWTs a cada envio com o CryptoJS que o
+Postman embute, e cada requisição declara o seu na aba *Authorization* — onde dá
+para trocar à mão e ver o que acontece.
+
+As pastas respondem a uma pergunta cada:
+
+| pasta | a pergunta |
+|---|---|
+| 1 · Busca, o básico | como eu uso isto |
+| 2 · O estado da conta decide | por que a mesma letra dá resposta diferente |
+| 3 · Cadastrar uma oferta | como a minha jornada publica |
+| 4 · O caminho de escrita | onde o comportamento é mapeado |
+| 5 · Segurança | o que é recusado, e com qual status |
+| 6 · CORS | por que o navegador falha e o Postman não |
+| 7 · Direto no Solr | o que o índice guarda — e o que ele não guarda |
+
+Ela **muda os dados enquanto você clica**, de propósito: a pasta 4 escreve no
+perfil que a pasta 1 lê, e a segunda passada responde diferente da primeira. É o
+mapeamento funcionando. Reiniciar a aplicação zera o perfil; as ofertas que a
+pasta 3 grava ficam no índice e saem com
+[`scripts/limpar-ofertas-de-teste.ps1`](scripts/limpar-ofertas-de-teste.ps1).
+
+**No newman, para CI** —
+[`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json),
+com **56 asserções** sobre o contrato público. Roda sem instalar nada permanente:
 
 ```powershell
 npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json
 ```
 
-Ou `File > Import` na interface do Postman. As asserções não dependem do
-`?explicar=true`: elas conferem o que qualquer cliente recebe.
+As asserções não dependem do `?explicar=true`: elas conferem o que qualquer
+cliente recebe. Esta é a collection a **não** abrir para explorar — ela escolhe o
+token pelo **número** no nome da requisição, e renomear uma quebra o token dela.
 
 **No terminal** — [`requisicoes/bater.ps1`](requisicoes/bater.ps1), sem precisar de
 extensão nenhuma. Ele resume a resposta no que importa para cada pergunta:
@@ -679,7 +709,8 @@ docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respos
 
 requisicoes/sugestoes.http     REST Client do VS Code, agrupado por pergunta
 requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
-requisicoes/postman-sugestao-busca.json   collection com 44 asserções (newman)
+requisicoes/postman-exploracao.json       36 requisições em 7 pastas, para clicar
+requisicoes/postman-sugestao-busca.json   collection com 56 asserções (newman)
 
 compose.yaml                   Solr 10 em container — escrito, nunca executado
 scripts/solr-local.ps1         Solr 10 do zip, sem container e sem admin
@@ -688,6 +719,7 @@ scripts/criar-colecao.ps1      cria a coleção e aplica o schema
 scripts/semear-vocabulario.ps1 vocabulário sintético
 scripts/conferir-piso.ps1      portão de publicação: k-anonimato e zero-resultado
 scripts/gerar-token.ps1        JWT de desenvolvimento, FORA da aplicação
+scripts/limpar-ofertas-de-teste.ps1  remove do índice o que o teste manual criou
 solr/schema-sugestoes.json     payload da Schema API
 solr/README.md                 por que cada campo existe
 ```

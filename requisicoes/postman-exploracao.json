@@ -1,0 +1,715 @@
+{
+  "info": {
+    "name": "Sugestao de Busca - exploracao manual",
+    "description": "Collection para abrir no Postman e clicar.\n\n## Antes de comecar\n\n1. Suba o Solr e a aplicacao com o perfil `local`:\n   ```\n   .\\scripts\\solr-local.ps1 start\n   .\\mvnw spring-boot:run \"-Dspring-boot.run.profiles=local\"\n   ```\n2. Importe este arquivo: **File > Import**.\n3. Clique em qualquer requisicao e mande **Send**. Nao ha ordem obrigatoria.\n\n## Os tokens sao assinados sozinhos\n\nTodas as rotas sao protegidas, e voce **nao precisa gerar token nenhum**. O script de pre-requisicao da collection assina um JWT novo a cada envio, com o CryptoJS que o Postman embute, e guarda em variaveis.\n\nCada requisicao mostra qual token usa na aba **Authorization** — e dah para trocar ali mesmo para ver o que acontece.\n\n| variavel | quem e | escopos |\n|---|---|---|\n| `tokenCliente` | o app, por `{{clienteAtual}}` | `sugestao:ler` `eventos:escrever` |\n| `token_pf_novo` e os outros `token_pf_*` | um perfil de demonstracao especifico | idem |\n| `tokenJornada` | a jornada `{{jornadaAtual}}` | `ofertas:escrever` `ofertas:ler` |\n| `tokenOutraJornada` | a jornada `seguros` | idem, mas de OUTRO dono |\n| `tokenOperacao` | operacao e carga de catalogo | `ofertas:todas` `aprendizado:executar` |\n| `tokenAdulterado` | token valido com a assinatura trocada | nenhum: deve dar 401 |\n\nNao ha token escrito no arquivo de proposito: token em arquivo versionado expira, e a partir do dia seguinte a collection falha por um motivo que nao e o codigo.\n\n## Os perfis de demonstracao\n\n| cliente | conta | o que ele demonstra |\n|---|---|---|\n| `pf-novo` | ATIVA | linha de base, sem afinidade |\n| `pf-pix-recusado` | ATIVA | gatilho ativo, afinidade com credito |\n| `pf-investidor` | ATIVA | ja contratou CDB |\n| `pf-sem-elegibilidade` | ATIVA | nenhuma elegibilidade concedida |\n| `pf-negativado` | INADIMPLENTE | fatura vencida |\n| `pf-bloqueado` | BLOQUEADA | suspeita de fraude |\n| `pf-uniclass` | ATIVA | faixa UNICLASS |\n| `pj-lojista` | ATIVA | pessoa juridica |\n\n## O que olhar na resposta\n\n- **`melhorOferta`** — a oferta acionavel de maior ranking entre as entregues. Ausente significa \"nao ha oferta elegivel para esta pessoa\", e isso e informacao, nao erro.\n- **`itens[].ofertaId`** — vazio significa \"esta linha nao e oferta\", nunca \"oferta sem id\".\n- **`explicacao.descartes`** — o motivo de cada ausencia. E a parte mais util da collection.\n- **`degradada`** — o perfil nao carregou; a lista e a popular do segmento.\n\n## Clicar muda os dados\n\nNao e um ambiente de leitura. Duas coisas acontecem enquanto voce explora:\n\n- **A pasta 4 escreve no perfil de `{{clienteAtual}}`** (`pf-novo`), e a pasta 1 le esse mesmo perfil. A segunda passada pela pasta 1 responde diferente da primeira — e isso e o mapeamento de comportamento funcionando, nao instabilidade. O registro de perfis e em memoria: reiniciar a aplicacao devolve o estado inicial.\n- **A pasta 3 grava oferta no indice**, e o indice e em disco, entao reiniciar nao resolve. Limpe com `.\\scripts\\limpar-ofertas-de-teste.ps1 -Confirmar`.\n\n## Nao confundir com a outra collection\n\n`postman-sugestao-busca.json` e para rodar no newman: 16 requisicoes e 56 assercoes, pensadas para CI, com os tokens escolhidos pelo **numero** no nome da requisicao — renomear uma la quebra o token dela. Esta aqui e para explorar com o olho: cada requisicao declara o proprio token na aba Authorization, as pastas sao independentes e nao ha ordem obrigatoria.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+
+  "variable": [
+    { "key": "host", "value": "http://localhost:8080", "type": "string" },
+    { "key": "solr", "value": "http://localhost:8983/solr/sugestoes", "type": "string" },
+    { "key": "segredo", "value": "SEGREDO-REMOVIDO-VER-SUGESTAO-SEGREDO", "type": "string" },
+    { "key": "emissor", "value": "https://sugestao-busca.dev", "type": "string" },
+
+    { "key": "clienteAtual", "value": "pf-novo", "type": "string" },
+    { "key": "segmentoAtual", "value": "PF", "type": "string" },
+    { "key": "relacionamentoAtual", "value": "VAREJO", "type": "string" },
+    { "key": "jornadaAtual", "value": "credito", "type": "string" },
+
+    { "key": "prefixo", "value": "emprestim", "type": "string" },
+    { "key": "ofertaDeTeste", "value": "OFR-CREDITO-CONSORCIO", "type": "string" }
+  ],
+
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Assina os tokens desta chamada, aqui mesmo, com o CryptoJS que o",
+          "// Postman embute. Roda antes de TODA requisicao, entao o token nunca",
+          "// esta expirado - e nao ha token escrito no arquivo.",
+          "",
+          "const SEGREDO = pm.collectionVariables.get('segredo');",
+          "const EMISSOR = pm.collectionVariables.get('emissor');",
+          "",
+          "function base64url(palavras) {",
+          "    return CryptoJS.enc.Base64.stringify(palavras)",
+          "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "}",
+          "",
+          "function assinar(corpo, segredo) {",
+          "    // JSON.stringify sem espaco: o que se assina e o que se envia,",
+          "    // byte a byte. Espaco em branco entra na assinatura.",
+          "    const cabecalho = base64url(CryptoJS.enc.Utf8.parse(",
+          "        JSON.stringify({ alg: 'HS256', typ: 'JWT' })));",
+          "    const conteudo = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(corpo)));",
+          "    const aAssinar = cabecalho + '.' + conteudo;",
+          "    return aAssinar + '.' + base64url(CryptoJS.HmacSHA256(aAssinar, segredo));",
+          "}",
+          "",
+          "const agora = Math.floor(Date.now() / 1000);",
+          "const comum = { iss: EMISSOR, iat: agora, exp: agora + 1800 };",
+          "",
+          "function tokenDeCliente(id, segmento, relacionamento) {",
+          "    return assinar(Object.assign({}, comum, {",
+          "        sub: id,",
+          "        segmento: segmento || 'PF',",
+          "        relacionamento: relacionamento || 'VAREJO',",
+          "        scope: 'sugestao:ler eventos:escrever'",
+          "    }), SEGREDO);",
+          "}",
+          "",
+          "// O cliente 'atual', controlado pela variavel clienteAtual. Trocar ela",
+          "// no painel de variaveis muda todas as buscas da pasta 1 de uma vez.",
+          "pm.collectionVariables.set('tokenCliente', tokenDeCliente(",
+          "    pm.collectionVariables.get('clienteAtual'),",
+          "    pm.collectionVariables.get('segmentoAtual'),",
+          "    pm.collectionVariables.get('relacionamentoAtual')));",
+          "",
+          "// Um token por perfil de demonstracao. A pasta 2 usa estes, porque la o",
+          "// ponto e comparar perfis lado a lado - com um token so, todas as",
+          "// requisicoes consultariam o mesmo cliente e nao demonstrariam nada.",
+          "const PERFIS = [",
+          "    ['pf-novo', 'PF', 'VAREJO'],",
+          "    ['pf-pix-recusado', 'PF', 'VAREJO'],",
+          "    ['pf-investidor', 'PF', 'VAREJO'],",
+          "    ['pf-sem-elegibilidade', 'PF', 'VAREJO'],",
+          "    ['pf-negativado', 'PF', 'VAREJO'],",
+          "    ['pf-bloqueado', 'PF', 'VAREJO'],",
+          "    ['pf-uniclass', 'PF', 'UNICLASS'],",
+          "    ['pj-lojista', 'PJ', 'VAREJO']",
+          "];",
+          "PERFIS.forEach(function (p) {",
+          "    pm.collectionVariables.set('token_' + p[0].replace(/-/g, '_'),",
+          "        tokenDeCliente(p[0], p[1], p[2]));",
+          "});",
+          "",
+          "// A jornada dona. A reivindicacao 'jornada' e o que diz de qual jornada",
+          "// ela e dona, e o caso de uso confere o corpo do cadastro contra ela.",
+          "pm.collectionVariables.set('tokenJornada', assinar(Object.assign({}, comum, {",
+          "    sub: 'jornada-' + pm.collectionVariables.get('jornadaAtual'),",
+          "    jornada: pm.collectionVariables.get('jornadaAtual'),",
+          "    scope: 'ofertas:escrever ofertas:ler'",
+          "}), SEGREDO));",
+          "",
+          "// Uma jornada DIFERENTE, para provar que ela nao publica no lugar da outra.",
+          "pm.collectionVariables.set('tokenOutraJornada', assinar(Object.assign({}, comum, {",
+          "    sub: 'jornada-seguros', jornada: 'seguros',",
+          "    scope: 'ofertas:escrever ofertas:ler'",
+          "}), SEGREDO));",
+          "",
+          "// Privilegio alto, com nome proprio: numa auditoria, procurar quem recebe",
+          "// 'ofertas:todas' e uma busca de uma linha.",
+          "pm.collectionVariables.set('tokenOperacao', assinar(Object.assign({}, comum, {",
+          "    sub: 'operacao-catalogo',",
+          "    scope: 'ofertas:escrever ofertas:ler ofertas:todas aprendizado:executar'",
+          "}), SEGREDO));",
+          "",
+          "// Assinado com OUTRO segredo: estruturalmente valido, criptograficamente",
+          "// nao. Usado na pasta 5.",
+          "pm.collectionVariables.set('tokenAdulterado', assinar(Object.assign({}, comum, {",
+          "    sub: 'invasor', segmento: 'PF', relacionamento: 'PRIVATE',",
+          "    scope: 'sugestao:ler ofertas:escrever ofertas:todas'",
+          "}), 'um-segredo-que-nao-e-o-do-servico-mas-tem-32'));",
+          "",
+          "// Um id de oferta unico por rodada, para a pasta 3 poder ser executada",
+          "// varias vezes sem colidir com ela mesma.",
+          "pm.collectionVariables.set('ofertaNova', 'OFR-CREDITO-TESTE-' + agora);"
+        ]
+      }
+    }
+  ],
+
+  "item": [
+    {
+      "name": "1 - Busca, o basico",
+      "description": "As quatro chamadas que respondem \"como eu uso isto\".\n\nTodas usam `{{tokenCliente}}`, que segue a variavel **clienteAtual** (`pf-novo` por padrao). Troque ela no painel de variaveis da collection para ver a pasta inteira mudar de pessoa.\n\n**Os dados mudam enquanto voce clica.** O registro de perfis e em memoria e a pasta 4 escreve nele — o mesmo `pf-novo` daqui. Rodar a pasta 4 e voltar para ca da resposta diferente, e e isso que ela existe para mostrar. `Ctrl+C` na aplicacao e subir de novo devolve tudo ao estado inicial.",
+      "item": [
+        {
+          "name": "Busca simples",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q={{prefixo}}",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "{{prefixo}}" }]
+            },
+            "description": "A chamada minima: um prefixo e um token.\n\n**Olhe:**\n- `melhorOferta.ofertaId` — o identificador que a jornada aciona\n- `itens[].origem` — CATALOGO, POPULAR, HISTORICO ou EVENTO\n- `itens[].relevancia` — `2.0` e jornada lider + produto; `3.0` inclui a afinidade desta pessoa\n\nO prefixo vai **cru**: a normalizacao e regra de dominio e acontece dentro."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200', () => pm.response.to.have.status(200));"
+          ]}}]
+        },
+        {
+          "name": "Com a explicacao da decisao",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [
+                { "key": "q", "value": "{{prefixo}}" },
+                { "key": "explicar", "value": "true" }
+              ]
+            },
+            "description": "A mesma busca, com o rastro da decisao.\n\n**Olhe `explicacao`:**\n- `jornadaLider` — qual intencao o prefixo revelou\n- `descartes` — **o motivo de cada ausencia**. E a parte mais util da API inteira: a pergunta que chega do negocio quase nunca e por que uma linha apareceu, e sim por que a outra nao apareceu\n- `msAteIndice` / `msAtePerfil` — as duas leituras correm em PARALELO, entao os dois numeros sao parecidos\n\n**Em producao isto fica desligado.** A lista de descartes diz quais produtos o cliente nao pode contratar, e isso e informacao sobre a pessoa, nao sobre a busca."
+          }
+        },
+        {
+          "name": "So a melhor oferta (limite=1)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q={{prefixo}}&limite=1",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [
+                { "key": "q", "value": "{{prefixo}}" },
+                { "key": "limite", "value": "1" }
+              ]
+            },
+            "description": "Para uma jornada que so precisa saber qual oferta acionar.\n\nCompare com a **Busca simples**: este item e exatamente o da posicao 0 de la. Pedir N devolve os N primeiros de pedir o maximo — o teto corta o fim da lista, nunca reordena o comeco.\n\nTente tambem `limite=0`, `limite=-1`, `limite=NaN`. Todos devolvem 200: valor ilegivel cai no padrao, valor acima do teto e limitado em silencio."
+          }
+        },
+        {
+          "name": "Prefixo curto: lista vazia, nao erro",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=e",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "e" }]
+            },
+            "description": "**Esta rota nao devolve erro.** Prefixo de um caractere, `q` ausente, `limite` ilegivel, `explicar` com texto sem sentido, faixa inexistente — tudo isso e 200 com lista vazia, limitada ou degradada.\n\nNao escreva tratamento de 4xx para ela. Escreva tratamento de **lista vazia**.\n\nCom um caractere o leque de candidatos seria o indice inteiro, e o prazo de 18 ms nao se sustentaria."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200 com lista vazia', function () {",
+            "    pm.response.to.have.status(200);",
+            "    pm.expect(pm.response.json().itens).to.be.an('array').that.is.empty;",
+            "});"
+          ]}}]
+        }
+      ]
+    },
+
+    {
+      "name": "2 - O estado da conta decide",
+      "description": "**O coracao do desenho.** Mesmo prefixo, pessoas diferentes, respostas diferentes.\n\nCada requisicao usa o token do SEU perfil (veja a aba Authorization). Rode em sequencia e compare `melhorOferta` e `explicacao.descartes`.\n\nO estado da conta **nao e aprendido** — ele e lido do perfil, publicado por outro produtor. Zero dias de observacao.",
+      "item": [
+        {
+          "name": "Conta ATIVA - recebe a oferta",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "`pf-novo`, conta ATIVA, chega sem historia. **A linha de base.**\n\nEspere `melhorOferta = OFR-CREDITO-EMPRESTIMO`, e repare que ele a recebe **sem ter elegibilidade nenhuma** — a oferta de emprestimo nao exige concessao previa, ao contrario do consignado duas requisicoes abaixo.\n\n**A relevancia depende de voce ja ter rodado a pasta 4.**\n\n| quando | relevancia | por que |\n|---|---|---|\n| app recem-subido | `2.0` | 1.6 (jornada lider) x 1.25 (empurra produto) |\n| depois da pasta 4 | `~3.0` | o mesmo, x (1 + afinidade x 0.5) |\n\nNao e instabilidade: `pf-novo` e o cliente que a **pasta 4 escreve**, e voce esta vendo o comportamento dele ter sido mapeado. Para voltar ao `2.0`, reinicie a aplicacao — o registro de perfis e em memoria.\n\nSe quiser uma linha de base que a collection nunca escreve, use `{{token_pf_uniclass}}` em `q=emprestim`: nada nesta collection grava nele."
+          }
+        },
+        {
+          "name": "Conta INADIMPLENTE - a oferta some",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_negativado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "`pf-negativado`, fatura vencida. **Mesmo prefixo, outra resposta.**\n\nEspere:\n- `melhorOferta` **ausente**\n- `descartes` com `CONTA_INADIMPLENTE` para `emprestimo pessoal` e `credito consignado`\n\nRepare que ele **ainda ve a busca** — \"contratar emprestimo\", que leva a uma pagina de busca. O que ele nao recebe e **proposta**. Esconder a busca inteira de quem esta em atraso seria a decisao errada; o caminho certo para essa pessoa e a renegociacao, que entra por gatilho."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('sem oferta para quem esta em atraso', function () {",
+            "    pm.expect(pm.response.json().melhorOferta).to.be.undefined;",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Conta BLOQUEADA",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_bloqueado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=transfer&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "transfer" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "`pf-bloqueado`, conta travada por suspeita de fraude.\n\nEspere `CONTA_NAO_OPERANTE` para `transferencia TED`. Desbloquear e contestar continuam na lista.\n\nConta **DESCONHECIDA** cai aqui junto com a bloqueada: falha fechada. Sem alguem que saiba dizer o estado, a operacao condicionada nao aparece."
+          }
+        },
+        {
+          "name": "Sem elegibilidade concedida",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_sem_elegibilidade}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=consignad&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "consignad" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "Espere `SEM_ELEGIBILIDADE` para `credito consignado`.\n\nE repare no que SOBRA: `como funciona o consignado`, o artigo de ajuda, e `jornadaLider = ajuda`.\n\n**Quem nao pode contratar recebe a explicacao, nao a oferta.** Isso nao e a API falhando.\n\nCompare com a mesma busca usando `{{token_pf_pix_recusado}}`, que tem a elegibilidade: la a jornada lider vira `credito` e o produto sobe ao topo."
+          }
+        },
+        {
+          "name": "Produto JA CONTRATADO",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_investidor}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=invest&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "invest" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "`pf-investidor` ja tem CDB.\n\nEspere `PRODUTO_JA_CONTRATADO` para CDB, e a melhor oferta passa a ser LCI.\n\nEste corte vem do **perfil**, nao do indice: produto contratado so e conhecido depois que o perfil chega, e transforma-lo em filtro no indice custaria enfileirar as duas leituras."
+          }
+        },
+        {
+          "name": "Faixa UNICLASS",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_uniclass}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=invest&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "invest" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "**Rode esta e a proxima em sequencia.** Mesmo prefixo, duas faixas.\n\nUNICLASS ve `OFR-INVESTIMENTO-CONSULTORIA` como melhor oferta. VAREJO ve `OFR-INVESTIMENTO-CDB`.\n\nO corte de faixa e **filtro no indice**, nao pos-filtro: item de faixa alta nao chega nem a pontuar para quem nao e da faixa. Por isso ele nao aparece nos descartes — ele nunca foi candidato.\n\nE a faixa vem do **token**, assinada. Antes da seguranca ela vinha de cabecalho, e quem escolhia o proprio cabecalho via oferta de faixa que nao era a dele."
+          }
+        },
+        {
+          "name": "Faixa VAREJO - compare com a anterior",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=invest&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "invest" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "A mesma busca da anterior, faixa VAREJO.\n\nA consultoria de investimentos **sumiu da lista inteira** — nao foi descartada, nunca entrou."
+          }
+        },
+        {
+          "name": "Gatilho ativo abre a lista (EVENTO)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_pix_recusado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=ant&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "ant" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "`pf-pix-recusado` teve um Pix recusado por saldo ha duas horas.\n\nEspere `origem: EVENTO` na **posicao 0**, com `relevancia 3.0` — o teto: 1.6 x 1.25 x 1.5, com a afinidade cheia dele em credito.\n\nA cota garante a linha; o evento **nao disputa por score**. Se disputasse, um gatilho forte empurraria a lista inteira para uma intencao que o cliente talvez nem estivesse perseguindo.\n\nSe a relevancia vier `2.999...` em vez de `3.0` exato, e o **decaimento** da afinidade: os cliques semeados tem minutos de idade, e a meia-vida de 7 dias ja tirou um fiapo."
+          }
+        },
+        {
+          "name": "Pessoa juridica",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pj_lojista}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=maquin&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "maquin" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "O segmento vem do token e corta o vocabulario **antes** de qualquer leitura de perfil. Tente o mesmo prefixo com `{{token_pf_novo}}` e compare."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "3 - Cadastrar uma oferta",
+      "description": "O lado de escrita do catalogo. Precisa de token de **jornada**.\n\nAs requisicoes usam `{{ofertaNova}}`, um identificador unico por rodada (`OFR-CREDITO-TESTE-<epoch>`), entao da para executar a pasta varias vezes sem colidir.\n\nO perfil de falha aqui e o **oposto** ao da busca: cada recusa e informacao que voce precisa receber inteira.\n\n### Limpar depois\n\nCada clique em \"Cadastrar\" deixa uma oferta no indice **para sempre** — nao ha `DELETE /v1/ofertas/{id}`, e isso e deliberado: retirar oferta do ar e operacao de catalogo, com quem aprovou e quando, nao um verbo exposto a qualquer jornada que tenha `ofertas:escrever`.\n\nEnquanto esse caminho nao existe, as ofertas de teste vao enchendo a busca de `consorc` de ruido. Para remove-las:\n\n```powershell\n.\\scripts\\limpar-ofertas-de-teste.ps1              # so lista\n.\\scripts\\limpar-ofertas-de-teste.ps1 -Confirmar   # apaga\n```\n\nEle fala com o Solr, nao com a aplicacao, e por isso nao pede token — e por isso tambem nao serve para producao.",
+      "item": [
+        {
+          "name": "Cadastrar (201)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenJornada}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ofertaId\": \"{{ofertaNova}}\",\n  \"termo\": \"consórcio de imóvel\",\n  \"sinonimos\": [\"consorcio\", \"carta de credito\", \"Consórcio\"],\n  \"rotulo\": \"sem juros, com parcelas fixas\",\n  \"destino\": \"/app/credito/consorcio-imovel\",\n  \"jornada\": \"credito\",\n  \"produtoAlvo\": \"CONSORCIO_IMOVEL\",\n  \"vetaInadimplencia\": true,\n  \"exigeContaAtiva\": true,\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\", \"UNICLASS\"],\n  \"vigenciaInicio\": \"2026-10-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-10-01T00:00:00Z\"\n}" },
+            "description": "**Olhe a resposta, nao so o status.**\n\nEla devolve o **estado gravado**, nao um eco do enviado:\n- `termo` volta `\"consorcio de imovel\"` — normalizado, sem acento\n- `sinonimos` volta deduplicado: \"Consórcio\" e \"consorcio\" viraram um so\n- `desempenho` volta **zerado**, com a frase \"medido pelo caminho de aprendizado; nao aceito no cadastro\"\n\nE o cabecalho `Location`.\n\n**O cadastro recusa `ctr`, `taxaAdesao` e `clientesDistintos`.** Sao os quatro numeros que mais mexem no ranking e nenhum e declaravel. Tente adiciona-los ao corpo: eles sao ignorados, nunca aceitos."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('201 criada', () => pm.response.to.have.status(201));",
+            "pm.test('termo volta normalizado', function () {",
+            "    pm.expect(pm.response.json().termo).to.eql('consorcio de imovel');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Reenviar o mesmo (200, idempotente)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenJornada}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ofertaId\": \"{{ofertaNova}}\",\n  \"termo\": \"consórcio de imóvel\",\n  \"rotulo\": \"rotulo corrigido no reenvio\",\n  \"destino\": \"/app/credito/consorcio-imovel\",\n  \"jornada\": \"credito\",\n  \"produtoAlvo\": \"CONSORCIO_IMOVEL\",\n  \"vetaInadimplencia\": true,\n  \"exigeContaAtiva\": true,\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\", \"UNICLASS\"],\n  \"vigenciaInicio\": \"2026-10-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-10-01T00:00:00Z\"\n}" },
+            "description": "Mesmo `ofertaId`, rotulo diferente. Espere **200**, nao 201.\n\nIdempotente por identificador. Nao e conveniencia: e o que permite a sua jornada reenviar depois de um timeout sem precisar saber se a primeira tentativa chegou.\n\nE um 200 onde voce esperava 201 avisa que o identificador colidiu — provavelmente dois produtos disputando o mesmo codigo.\n\n**Limite conhecido:** ler-existencia e gravar sao duas chamadas sem transacao. Com 12 POSTs simultaneos do mesmo id, todos respondem 201. A gravacao continua correta (ha uma oferta so); so o status fica otimista."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('200, substituiu', () => pm.response.to.have.status(200));"
+          ]}}]
+        },
+        {
+          "name": "Ler de volta o que ficou gravado",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenJornada}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/ofertas/{{ofertaNova}}",
+              "host": ["{{host}}"], "path": ["v1", "ofertas", "{{ofertaNova}}"]
+            },
+            "description": "Existe porque o cadastro **normaliza**. Sem uma leitura de volta, voce nao tem como saber qual das suas duas grafias sobreviveu."
+          }
+        },
+        {
+          "name": "A oferta nova JA aparece na busca",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=consorc&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "consorc" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "**Sem esperar nada.** A oferta acabou de ser cadastrada e ja esta na busca.\n\nEla tem `clientes_distintos = 0`, porque ninguem a buscou ainda. Sob a regra antiga — piso de k-anonimato aplicado a todos os tipos — ela ficaria invisivel ate acumular trinta buscas que nunca aconteceriam, porque ela nao aparece.\n\nO piso vale so para termo vindo do **log**: nome de produto nao conta nada sobre ninguem, nao ha sujeito para reidentificar."
+          }
+        },
+        {
+          "name": "E some para quem a restricao veta",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_negativado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=consorc&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "consorc" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "O `vetaInadimplencia: true` que voce **declarou no cadastro** e aplicado aqui, na **leitura**, pela Peneira.\n\nO mesmo campo nas duas pontas. Espere `CONTA_INADIMPLENTE` nos descartes."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "4 - O caminho de escrita",
+      "description": "A busca nao registra nada por conta propria — **a leitura nunca escreve**, e o compilador garante: o caso de uso de sugestao recebe so `RepositorioDePerfil`, que nao tem metodo de escrita.\n\nRode as quatro em ordem para ver o comportamento sendo mapeado e aparecendo na busca seguinte.",
+      "item": [
+        {
+          "name": "a) Registrar busca, impressao e clique",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/eventos", "host": ["{{host}}"], "path": ["v1", "eventos"] },
+            "body": { "mode": "raw", "raw": "[\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"emprestimo pessoal\" },\n  { \"tipo\": \"SUGESTAO_EXIBIDA\",\n    \"termosExibidos\": [\"empréstimo pessoal\", \"contratar emprestimo\"],\n    \"listaDegradada\": false },\n  { \"tipo\": \"SUGESTAO_CLICADA\", \"termo\": \"empréstimo pessoal\",\n    \"posicao\": 0, \"jornada\": \"credito\" },\n  { \"tipo\": \"SUGESTAO_CLICADA\", \"termo\": \"empréstimo pessoal\",\n    \"posicao\": 0, \"jornada\": \"credito\" },\n  { \"tipo\": \"SUGESTAO_CLICADA\", \"termo\": \"empréstimo pessoal\",\n    \"posicao\": 0, \"jornada\": \"credito\" }\n]" },
+            "description": "Um **array**, nao um objeto. Responde **202 e acabou** — ninguem esta esperando.\n\n**Nao ha `clienteId` no corpo.** Ele vem do `sub` do token. Aceita-lo no corpo deixaria qualquer chamador escrever comportamento em nome de qualquer pessoa — e como e esse identificador que a agregacao conta para medir clientes distintos, quem controlasse o corpo controlaria o piso de k-anonimato.\n\n**Tres cliques, nao um.** O piso de confianca e 6 pontos e clique vale 2: tres cliques dao afinidade 1,0. Um clique sozinho daria 0,33 — o sistema deliberadamente nao acredita no primeiro clique.\n\n`SUGESTAO_EXIBIDA` com `termosExibidos` e **a posicao** e o que torna o aprendizado possivel: sem ela o modelo aprende que a primeira linha e a melhor, quando ela e apenas onde a linha estava."
+          }
+        },
+        {
+          "name": "b) PII e barrada na entrada",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/eventos", "host": ["{{host}}"], "path": ["v1", "eventos"] },
+            "body": { "mode": "raw", "raw": "[\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"pagar boleto 529.982.247-25\" },\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"cartao 4539 1488 0343 6467\" },\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"pix para joao@exemplo.com\" },\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"chave 123e4567-e89b-12d3-a456-426614174000\" },\n  { \"tipo\": \"BUSCA_DIGITADA\", \"termo\": \"emprestimo pessoal\" }\n]" },
+            "description": "CPF com digito verificador valido, cartao que passa no Luhn, e-mail, chave Pix em UUID.\n\nEspere `aceitos: 1`, `descartados: 4`, com os motivos CPF, CARTAO, EMAIL, CHAVE_PIX_ALEATORIA.\n\n**A resposta nunca devolve o termo barrado.** Devolve-lo no corpo do erro recriaria exatamente o vazamento que o saneamento evitou.\n\nEste e o **primeiro** dos dois portoes de privacidade. O segundo e o piso de k-anonimato, e eles pegam coisas diferentes: o saneamento pega padrao (CPF, cartao), o piso pega o que e raro demais (\"adiantamento para maria silva\" nao casa com padrao nenhum, mas so uma pessoa buscou)."
+          }
+        },
+        {
+          "name": "c) Rodar o aprendizado agora",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenOperacao}}", "type": "string" }] },
+            "method": "POST", "header": [],
+            "url": { "raw": "{{host}}/v1/aprendizado/rodar", "host": ["{{host}}"], "path": ["v1", "aprendizado", "rodar"] },
+            "description": "Normalmente o agendador faz isto a cada 15 s. Este gatilho existe para a demonstracao e **fica desligado em producao** — e um gatilho que da para disparar em laco.\n\nPrecisa de `aprendizado:executar`, que so o token de operacao tem.\n\n**Olhe `retidosPeloPiso`:** o termo que voce acabou de buscar esta ai. Ele **nao** foi publicado, porque so uma pessoa o buscou e o piso exige 30 clientes distintos."
+          }
+        },
+        {
+          "name": "d) A busca seguinte e diferente",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "**Compare com a \"Busca simples\" da pasta 1.**\n\n> Esta comparacao so vale **uma vez por execucao da aplicacao**: na segunda passada o comportamento ja estava mapeado e nao ha o que mudar. Reinicie a aplicacao para ve-la de novo.\n\nDuas coisas mudaram:\n- a relevancia do topo subiu de `2.0` para `3.0` — a afinidade dos tres cliques\n- aparece uma linha `origem: HISTORICO`, e ela carrega o `ofertaId` da oferta de catalogo\n\nEssa segunda e sutil e vale olhar: a linha do historico venceu a deduplicacao contra o item de catalogo e **herdou o identificador e a jornada**. Procure `TERMO_DUPLICADO` nos descartes.\n\n**O comportamento nao foi calculado dentro desta requisicao.** Ele foi lido de um retrato pronto, montado pela rodada anterior. Mapear acontece ENTRE uma busca e a proxima — porque o clique acontece depois da resposta."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "5 - Seguranca: o que e recusado",
+      "description": "Todas aqui devem **falhar**. Se alguma responder 200, ha um problema.",
+      "item": [
+        {
+          "name": "Sem token (401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }]
+            },
+            "description": "Espere **401** em `application/problem+json`, com `WWW-Authenticate: Bearer`.\n\n**Olhe o `detail`:** ele nao conta POR QUE falhou. \"Expirado\" ou \"assinatura invalida\" ajudam quem integra e ajudam igualmente quem esta sondando — o motivo exato fica no log do servico."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('401', () => pm.response.to.have.status(401));",
+            "pm.test('nao conta o motivo', function () {",
+            "    const d = pm.response.json().detail.toLowerCase();",
+            "    ['expirad', 'assinatura', 'signature'].forEach(p =>",
+            "        pm.expect(d, 'vazou: ' + p).to.not.include(p));",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Token adulterado (401)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenAdulterado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }]
+            },
+            "description": "Este token e estruturalmente perfeito: tem `sub`, `scope` generoso e ate `relacionamento: PRIVATE`. Mas foi assinado com **outro segredo**.\n\nEspere 401. Cole-o em jwt.io para ver que o conteudo e exatamente o que um invasor gostaria de ter."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('401', () => pm.response.to.have.status(401));"
+          ]}}]
+        },
+        {
+          "name": "Escopo errado: cliente tentando cadastrar (403)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ofertaId\": \"OFR-NAO-DEVERIA-PASSAR\",\n  \"termo\": \"oferta de um cliente\",\n  \"destino\": \"/app/x\",\n  \"jornada\": \"credito\",\n  \"produtoAlvo\": \"X\",\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-01-01T00:00:00Z\"\n}" },
+            "description": "Token de cliente, valido, mas sem `ofertas:escrever`.\n\nEspere **403** com `type: .../sem-permissao`."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('403', () => pm.response.to.have.status(403));"
+          ]}}]
+        },
+        {
+          "name": "JORNADA ALHEIA: seguros publicando em credito (403)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenOutraJornada}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ofertaId\": \"OFR-INVADIDA\",\n  \"termo\": \"emprestimo com condicao especial\",\n  \"destino\": \"/app/credito/invadida\",\n  \"jornada\": \"credito\",\n  \"produtoAlvo\": \"INVADIDA\",\n  \"segmentos\": [\"PF\"],\n  \"relacionamentos\": [\"VAREJO\"],\n  \"vigenciaInicio\": \"2026-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2027-01-01T00:00:00Z\"\n}" },
+            "description": "**A requisicao mais importante desta pasta.**\n\nO token e de `seguros` e **TEM** `ofertas:escrever` — entao a cadeia de autorizacao do Spring deixa passar. Quem recusa e a **regra de negocio**, no caso de uso: a oferta tem de ser da jornada de quem cadastra.\n\nSem essa regra, qualquer servico com permissao de cadastrar publicaria oferta de QUALQUER jornada, com rotulo e destino escolhidos por ele, e ela apareceria na busca como se fosse do time dono.\n\nEspere 403 com `type: .../jornada-nao-autorizada`, mais `jornadaPedida` e `jornadaDoChamador`.\n\nRepare que **nao ha `violacoes`**: o corpo estava valido. 422 diz \"o que voce mandou esta errado\"; 403 diz \"esta certo e nao e seu\"."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('403 por jornada, nao por escopo', function () {",
+            "    pm.response.to.have.status(403);",
+            "    pm.expect(pm.response.json().type).to.include('jornada-nao-autorizada');",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Cadastro invalido: 8 violacoes de uma vez (422)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenJornada}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{host}}/v1/ofertas", "host": ["{{host}}"], "path": ["v1", "ofertas"] },
+            "body": { "mode": "raw", "raw": "{\n  \"ofertaId\": \"x\",\n  \"termo\": \"oferta de teste\",\n  \"destino\": \"https://site-de-phishing.example/pix\",\n  \"jornada\": \"busca\",\n  \"gatilhos\": [\"GATILHO INVALIDO!\"],\n  \"segmentos\": [\"PESSOA_FISICA\"],\n  \"relacionamentos\": [\"BLACK\"],\n  \"vigenciaInicio\": \"2027-01-01T00:00:00Z\",\n  \"vigenciaFim\": \"2026-01-01T00:00:00Z\"\n}" },
+            "description": "Oito campos errados, **oito violacoes numa resposta**.\n\nRecusar no primeiro problema transformaria a integracao numa sequencia de tentativas, uma por campo, cada uma precisando de um ciclo de deploy do seu lado.\n\nCada violacao tem `campo`, `codigo` e `mensagem`. **Case contra `codigo`**, nunca contra `mensagem`: a redacao muda quando melhora, o codigo e contrato.\n\nDois valem comentario:\n- **`destino` absoluto.** O destino volta para o app e o app navega para ele. Aceitar `https://` faria do cadastro um redirecionador aberto, com o nome do banco na frente.\n- **`jornada: \"busca\"`.** E o balde dos termos sem jornada. Uma oferta cadastrada nele nunca lideraria jornada nenhuma e nunca receberia afinidade: pagaria o custo de existir sem nenhum beneficio."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('422 com as 8 violacoes', function () {",
+            "    pm.response.to.have.status(422);",
+            "    pm.expect(pm.response.json().violacoes).to.have.lengthOf(8);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "Oferta inexistente (404)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenJornada}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/ofertas/OFR-NAO-EXISTE",
+              "host": ["{{host}}"], "path": ["v1", "ofertas", "OFR-NAO-EXISTE"]
+            },
+            "description": "404 em problem+json, com `ofertaId` de volta."
+          }
+        },
+        {
+          "name": "Rota inexistente: 403, nao 404",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{tokenCliente}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": { "raw": "{{host}}/v1/nao-existe", "host": ["{{host}}"], "path": ["v1", "nao-existe"] },
+            "description": "Token valido, rota que nao existe: **403**, nao 404.\n\nE `anyRequest().denyAll()` funcionando. **Rota nova nasce fechada** — o contrario so se descobre em revisao de seguranca. E de passagem nao se conta a quem sonda quais caminhos existem."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "6 - CORS: um cliente de navegador",
+      "description": "Sem CORS, a API responde normalmente ao Postman e e **bloqueada pelo navegador** — o 200 chega e o JavaScript nunca ve o corpo. No DevTools isso aparece como erro de rede, o que manda investigar o lugar errado.",
+      "item": [
+        {
+          "name": "Preflight de origem autorizada",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "OPTIONS",
+            "header": [
+              { "key": "Origin", "value": "http://localhost:3000" },
+              { "key": "Access-Control-Request-Method", "value": "GET" },
+              { "key": "Access-Control-Request-Headers", "value": "authorization" }
+            ],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }]
+            },
+            "description": "O que o navegador manda **antes** de cada GET, porque `Authorization` nao esta na lista segura do CORS.\n\n**Olhe os cabecalhos de resposta:**\n- `Access-Control-Allow-Origin` ecoa a origem, e **nao** e `*`\n- `Access-Control-Max-Age: 1800` — sem isso, numa caixa de busca que consulta a cada tecla o preflight **dobraria** o trafego\n- `Access-Control-Expose-Headers: Location` — sem expor, o JavaScript nao consegue ler o Location do 201\n\nNote que o preflight vai **sem token**: por especificacao o navegador nao manda `Authorization` no OPTIONS."
+          }
+        },
+        {
+          "name": "Preflight de origem desconhecida (403)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "OPTIONS",
+            "header": [
+              { "key": "Origin", "value": "https://site-qualquer.example" },
+              { "key": "Access-Control-Request-Method", "value": "GET" }
+            ],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }]
+            },
+            "description": "403, e **nenhum** `Access-Control-Allow-Origin` na resposta.\n\n`sugestao.cors.origens` vem **vazio** por padrao, e vazio significa nenhuma origem autorizada — nao todas. Um `*` funcionaria em todo lugar, inclusive em producao."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "7 - Direto no Solr",
+      "description": "Para ver o que o indice de fato guarda. Nao precisa de token: o Solr nao esta atras da aplicacao.\n\n**A descoberta mais interessante aqui e o que ele NAO guarda.**",
+      "item": [
+        {
+          "name": "O identificador do cliente esta no indice?",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{solr}}/select?q=pf-*&rows=5&wt=json",
+              "host": ["{{solr}}"], "path": ["select"],
+              "query": [
+                { "key": "q", "value": "pf-*" },
+                { "key": "rows", "value": "5" },
+                { "key": "wt", "value": "json" }
+              ]
+            },
+            "description": "Espere **`numFound: 0`**.\n\nE por construcao, nao por disciplina: a porta de saida da busca recebe `ContextoDeBusca` — segmento e faixa — e **nao** `Cliente`. O compilador impede a identidade de passar por ali.\n\nO estado da conta e a afinidade tambem nao estao aqui. Eles vivem no perfil, e sao cruzados com a oferta na Peneira, em CPU, **depois** de o indice ja ter respondido."
+          }
+        },
+        {
+          "name": "Contagem por tipo de documento",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{solr}}/select?q=*:*&rows=0&facet=true&facet.field=tipo&wt=json",
+              "host": ["{{solr}}"], "path": ["select"],
+              "query": [
+                { "key": "q", "value": "*:*" }, { "key": "rows", "value": "0" },
+                { "key": "facet", "value": "true" }, { "key": "facet.field", "value": "tipo" },
+                { "key": "wt", "value": "json" }
+              ]
+            },
+            "description": "`oferta` tem produto e identificador. `consulta` veio do log de busca. `acao` e `entidade` sao navegacao e vocabulario."
+          }
+        },
+        {
+          "name": "As ofertas e seus identificadores",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{solr}}/select?q=tipo:oferta&rows=30&fl=oferta_id_s,termo,produto_alvo_s,jornada_s,veta_inadimplencia_b,clientes_distintos_i&wt=json",
+              "host": ["{{solr}}"], "path": ["select"],
+              "query": [
+                { "key": "q", "value": "tipo:oferta" }, { "key": "rows", "value": "30" },
+                { "key": "fl", "value": "oferta_id_s,termo,produto_alvo_s,jornada_s,veta_inadimplencia_b,clientes_distintos_i" },
+                { "key": "wt", "value": "json" }
+              ]
+            },
+            "description": "**Repare em `clientes_distintos_i: 0`.**\n\nNao e dado faltando: catalogo nao e agregado de log, e nao existe \"quantos clientes distintos buscaram o produto emprestimo pessoal\" medido em lugar nenhum. Antes havia um numero alto inventado ali, so para o item passar pelo filtro do piso — a regra estava certa e aplicada no lugar errado, e o preco era um dado falso no indice, exatamente onde se audita privacidade.\n\nE `veta_inadimplencia_b` e propriedade **da oferta**: \"esta oferta nao serve a quem esta em atraso\", nunca \"este cliente esta em atraso\"."
+          }
+        },
+        {
+          "name": "Termos abaixo do piso: eles EXISTEM",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{solr}}/select?q=*:*&rows=20&fq=tipo:consulta&fq=clientes_distintos_i:[* TO 29]&fl=termo,clientes_distintos_i&wt=json",
+              "host": ["{{solr}}"], "path": ["select"],
+              "query": [
+                { "key": "q", "value": "*:*" }, { "key": "rows", "value": "20" },
+                { "key": "fq", "value": "tipo:consulta" },
+                { "key": "fq", "value": "clientes_distintos_i:[* TO 29]" },
+                { "key": "fl", "value": "termo,clientes_distintos_i" },
+                { "key": "wt", "value": "json" }
+              ]
+            },
+            "description": "Termos que pouca gente buscou. Eles **estao** no indice — e nenhuma sugestao pode devolve-los.\n\nOlhe os valores de `k`: 1, 2, 3... E olhe os termos. \"adiantamento para maria silva\" nao casa com nenhum padrao de PII, entao o saneamento o deixou passar. Quem o segura e o piso.\n\nA proxima requisicao mostra que eles sao inalcancaveis."
+          }
+        },
+        {
+          "name": "O fq de producao os remove",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{solr}}/select?q=*:*&rows=0&fq=(*:* -tipo:consulta) OR clientes_distintos_i:[30 TO *]&fq=tipo:consulta&fq=clientes_distintos_i:[* TO 29]&wt=json",
+              "host": ["{{solr}}"], "path": ["select"],
+              "query": [
+                { "key": "q", "value": "*:*" }, { "key": "rows", "value": "0" },
+                { "key": "fq", "value": "(*:* -tipo:consulta) OR clientes_distintos_i:[30 TO *]" },
+                { "key": "fq", "value": "tipo:consulta" },
+                { "key": "fq", "value": "clientes_distintos_i:[* TO 29]" },
+                { "key": "wt", "value": "json" }
+              ]
+            },
+            "description": "O mesmo recorte da requisicao anterior, agora **com o filtro que a producao usa**.\n\nEspere **`numFound: 0`**.\n\nO filtro, lido em voz alta, e a regra: *\"ou nao e termo do log, ou limpa o piso\"*. E ele e `fq`, nunca pos-filtro: um termo abaixo do piso nao chega nem a pontuar."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('nenhum termo abaixo do piso e alcancavel', function () {",
+            "    pm.expect(pm.response.json().response.numFound).to.eql(0);",
+            "});"
+          ]}}]
+        }
+      ]
+    }
+  ]
+}
