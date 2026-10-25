@@ -41,7 +41,35 @@ public record SugestaoProperties(
 
         Peso peso,
 
-        Aprendizado aprendizado) {
+        Aprendizado aprendizado,
+
+        /*
+         * O que um cliente de navegador precisa para chamar este servico. Vem
+         * vazio, e vazio significa nenhuma origem autorizada — nao todas.
+         */
+        Cors cors) {
+
+    /**
+     * Origens autorizadas e por quanto tempo o navegador guarda o preflight.
+     *
+     * <p>É um record separado para o padrão poder ser "desligado" sem ser nulo
+     * espalhado pelo código: {@link #desligado()} devolve lista vazia, e lista
+     * vazia é a decisão de não autorizar ninguém.
+     */
+    public record Cors(List<String> origens, long maxAgeSegundos) {
+
+        public Cors {
+            origens = origens == null ? List.of() : List.copyOf(origens);
+            // 1800 s cobre uma sessao de uso. O Chrome limita o proprio teto em
+            // 2 h, entao pedir mais nao ajuda; pedir menos faz o navegador
+            // repetir o preflight no meio da digitacao.
+            maxAgeSegundos = maxAgeSegundos <= 0 ? 1800 : maxAgeSegundos;
+        }
+
+        public static Cors desligado() {
+            return new Cors(List.of(), 1800);
+        }
+    }
 
     public record Solr(String baseUrl, String colecao) { }
 

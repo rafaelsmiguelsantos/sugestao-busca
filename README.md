@@ -96,6 +96,26 @@ sai com código 1 se um termo abaixo do piso aparecer em qualquer consulta, ou s
 um termo publicado não for alcançável por nenhum prefixo plausível. Nenhum dos
 dois tem faixa aceitável.
 
+### Um cliente React ou Angular
+
+Precisa de uma configuração, e é a que mais engana: **sem CORS a API responde
+normalmente a `curl` e é bloqueada pelo navegador**. O `200` chega e o JavaScript
+nunca vê a resposta, porque faltam os cabeçalhos `Access-Control-*`. No DevTools
+aparece como erro de rede, o que manda investigar o lugar errado.
+
+```properties
+# application-local.properties ja lista as portas de 3000, 4200 e 5173
+sugestao.cors.origens=http://localhost:3000,http://127.0.0.1:3000
+```
+
+Vazio significa **nenhuma** origem, não todas — e `localhost` e `127.0.0.1` são
+origens diferentes para o CORS.
+
+[`docs/cliente-web.md`](docs/cliente-web.md) tem o hook React e o serviço Angular
+completos, e os quatro problemas de busca-ao-digitar — sobretudo o terceiro, que
+não aparece em rede local: **resposta fora de ordem**, quando a resposta de
+`cons` chega depois da de `consignado` e sobrescreve a lista correta.
+
 ### Bater nos endpoints
 
 Duas formas, as mesmas chamadas. Não há tela: a evidência é a resposta.

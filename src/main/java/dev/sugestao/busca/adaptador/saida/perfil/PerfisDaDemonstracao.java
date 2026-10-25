@@ -35,11 +35,19 @@ public final class PerfisDaDemonstracao {
 
                 // Pix recusado por saldo há duas horas. Mostra a linha de
                 // evento abrindo a lista com rótulo próprio.
+                //
+                // CONSIGNADO está aqui porque sem ele o produto
+                // OFR-CREDITO-CONSIGNADO era inalcançável para os oito perfis:
+                // o único que tinha a elegibilidade era o pf-negativado, e
+                // crédito consignado veta inadimplência. A oferta existia no
+                // índice, com identificador, e ninguém nunca a veria — buraco
+                // no dado de demonstração que só apareceu quando alguém digitou
+                // "consignado" e leu a lista de descartes.
                 "pf-pix-recusado", new Perfil(
                         List.of("pagar boleto", "limite do pix", "pix agendado"),
                         Set.of("pix_recusado_72h", "saldo_insuficiente_24h"),
                         Set.of(),
-                        Set.of("ANTECIPACAO", "EMPRESTIMO", "LIMITE_CARTAO"),
+                        Set.of("ANTECIPACAO", "EMPRESTIMO", "LIMITE_CARTAO", "CONSIGNADO"),
                         SituacaoDaConta.ATIVA, Map.of("credito", 1.0, "pix", 0.4), true),
 
                 // Já tem CDB. Digita "cdb" e não recebe de volta o que já
