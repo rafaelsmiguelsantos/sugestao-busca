@@ -8,8 +8,10 @@ import dev.sugestao.busca.dominio.evento.TipoDeEvento;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -23,7 +25,26 @@ class AgregadosEmMemoriaTest {
     private static final PesosDeFadiga FADIGA = PesosDeFadiga.padrao();
     private static final String CLIENTE = "pf-teste";
 
-    private final AgregadosEmMemoria agregados = new AgregadosEmMemoria(10_000);
+    /**
+     * RELOGIO FIXO, e isto e o conserto de uma familia de testes instaveis.
+     *
+     * Com relogio real, um evento criado em Instant.now() e agregado alguns
+     * microssegundos depois tem idade > 0, e o decaimento a desconta: tres
+     * cliques "de agora" dao 5,999999993 pontos em vez de 6,0, e a afinidade sai
+     * 0,9999999996 em vez de 1,0.
+     *
+     * Tres assercoes deste arquivo afirmavam igualdade exata nessa borda.
+     * Passavam numa maquina ociosa e falhavam sob carga - a ultima delas so
+     * apareceu rodando a suite doze vezes com os doze nucleos ocupados.
+     *
+     * Afrouxar a tolerancia era a saida facil e tem custo escondido: tolerancia
+     * de 1e-6 tambem aceita um erro de verdade de 1e-6. Com o relogio fixo, as
+     * assercoes de borda voltam a ser EXATAS e passam a valer mais.
+     */
+    private static final Instant AGORA = Instant.parse("2026-06-15T12:00:00Z");
+
+    private final AgregadosEmMemoria agregados =
+            new AgregadosEmMemoria(10_000, Clock.fixed(AGORA, ZoneOffset.UTC));
 
     private static EventoDeBusca clique(String jornada, long diasAtras) {
         return evento(TipoDeEvento.SUGESTAO_CLICADA, jornada, "um termo", diasAtras);
@@ -45,7 +66,7 @@ class AgregadosEmMemoriaTest {
             TipoDeEvento tipo, String jornada, String termo, long diasAtras) {
 
         return new EventoDeBusca(tipo, CLIENTE, Segmento.PF, termo, List.of(), 0, "",
-                jornada, false, Instant.now().minus(diasAtras, ChronoUnit.DAYS));
+                jornada, false, AGORA.minus(diasAtras, ChronoUnit.DAYS));
     }
 
     private double afinidade(String jornada) {
@@ -82,18 +103,14 @@ class AgregadosEmMemoriaTest {
     void tresCliquesChegamAoTeto() {
         agregados.acumular(List.of(clique("credito"), clique("credito"), clique("credito")));
 
-        // isCloseTo e nao isEqualTo, e a tolerancia tem motivo.
+        // isEqualTo EXATO, e isso e possivel por causa do relogio fixo.
         //
-        // O clique e criado em Instant.now() e a agregacao chama Instant.now()
-        // de novo: a idade do evento e de microssegundos, mas nao e zero, e o
-        // decaimento a desconta. Tres cliques dao 5,999999993 pontos em vez de
-        // 6,0 exatos, e a afinidade sai 0,9999999988.
-        //
-        // Com isEqualTo(1.0) este teste passava ou falhava conforme o relogio
-        // tivesse ou nao virado o milissegundo entre criar o evento e agregar —
-        // flaky por construcao, passando por sorte. A propriedade real e "tres
-        // cliques chegam ao teto", e ela nao depende do nono digito decimal.
-        assertThat(afinidade("credito")).isCloseTo(1.0, within(1e-6));
+        // Com relogio real, tres cliques "de agora" tinham idade de
+        // microssegundos e davam 5,999999993 pontos em vez de 6,0: a afinidade
+        // saia 0,9999999988 e este teste precisava de tolerancia. Com o evento e
+        // a agregacao no mesmo instante, a conta e exata — e o 1,0 passa a ser
+        // uma afirmacao sobre o teto, nao sobre o decimo decimal.
+        assertThat(afinidade("credito")).isEqualTo(1.0);
 
         // O limite em 1 é o que preserva a propriedade que a normalização pelo
         // próprio máximo protegia: quem clicou três vezes e quem clicou
@@ -102,10 +119,6 @@ class AgregadosEmMemoriaTest {
         for (int i = 0; i < 300; i++) {
             agregados.acumular(List.of(clique("credito")));
         }
-        // Aqui isEqualTo cabe: com 600 pontos o Math.min corta em 1,0 exato, e o
-        // decaimento de microssegundos nao chega perto de tirar os 594 pontos de
-        // folga. A diferenca entre as duas assercoes deste teste e justamente o
-        // ponto: uma vive na borda do teto, a outra esta bem dentro dele.
         assertThat(afinidade("credito")).isEqualTo(1.0);
     }
 
@@ -185,21 +198,20 @@ class AgregadosEmMemoriaTest {
         double segunda = afinidade("credito");
         double terceira = afinidade("credito");
 
-        // Tolerancia, e nao igualdade exata — e a tolerancia aqui NAO e
-        // formalidade, e o conteudo do teste.
+        // IGUALDADE EXATA, e aqui ela e o conteudo do teste.
         //
-        // A igualdade exata era falsa de direito: o decaimento e por idade, a
-        // idade cresce entre as tres chamadas, e portanto o valor cai um pouco a
-        // cada uma. O teste passava so porque as tres chamadas caiam no mesmo
-        // milissegundo do relogio.
+        // Com relogio real esta afirmacao era falsa de direito: o decaimento e
+        // por idade, a idade cresce entre as tres chamadas, e o valor caia um
+        // fiapo a cada uma. O teste precisava de tolerancia de 1e-6, e passava
+        // so porque as tres chamadas caiam no mesmo milissegundo — flaky, e
+        // afirmando menos do que queria.
         //
-        // E o que ele quer afirmar e outra coisa, mais forte: rodar a agregacao
-        // uma vez ou tres vezes NAO esvazia a afinidade. Com decaimento por
-        // rodada, a terceira chamada devolveria uma fracao da primeira — nao uma
-        // diferenca no sexto decimal. A tolerancia de 1e-6 separa exatamente
-        // esses dois mundos.
-        assertThat(segunda).isCloseTo(primeira, within(1e-6));
-        assertThat(terceira).isCloseTo(primeira, within(1e-6));
+        // Com relogio fixo, "rodar a agregacao uma vez ou tres vezes da a mesma
+        // resposta" volta a ser exatamente o que esta escrito. Com decaimento
+        // por rodada — a armadilha que esta classe evita — a terceira chamada
+        // devolveria uma fracao da primeira, e a igualdade exata falharia alto.
+        assertThat(segunda).isEqualTo(primeira);
+        assertThat(terceira).isEqualTo(primeira);
     }
 
     @Test

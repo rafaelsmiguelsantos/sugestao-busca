@@ -1,0 +1,838 @@
+<title>Chamando a Sugestão de Busca</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+
+<style>
+/* Layout: coluna única de leitura, com o orçamento de 30 ms como espinha visual
+   do pipeline. Marcadores numerados porque isto É uma sequência real. */
+:root {
+  --papel:      #f7f6f3;
+  --superficie: #ffffff;
+  --tinta:      #15181d;
+  --tinta-fraca:#5c6471;
+  --linha:      #dcd9d2;
+  --azul:       #1b3a63;   /* a cor do serviço: fria, de instrumento */
+  --ambar:      #9a6207;   /* oferta: o que a API existe para devolver */
+  --ambar-fundo:#fdf5e6;
+  --recusa:     #9b2c2c;   /* removido, com motivo */
+  --recusa-fundo:#fcf0ef;
+  --ok:         #1f6b4a;
+
+  --display: "IBM Plex Serif", Georgia, serif;
+  --corpo:   "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --papel:      #121418;
+    --superficie: #1a1e24;
+    --tinta:      #e8e6e1;
+    --tinta-fraca:#9aa3b0;
+    --linha:      #2c323b;
+    --azul:       #8fb4e0;
+    --ambar:      #e2a948;
+    --ambar-fundo:#2a2213;
+    --recusa:     #e78b85;
+    --recusa-fundo:#2a1817;
+    --ok:         #6cc49a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --papel:      #121418;
+  --superficie: #1a1e24;
+  --tinta:      #e8e6e1;
+  --tinta-fraca:#9aa3b0;
+  --linha:      #2c323b;
+  --azul:       #8fb4e0;
+  --ambar:      #e2a948;
+  --ambar-fundo:#2a2213;
+  --recusa:     #e78b85;
+  --recusa-fundo:#2a1817;
+  --ok:         #6cc49a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: var(--corpo);
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.envoltorio {
+  max-width: 54rem;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 3.5rem 5rem;
+}
+
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.7rem); font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.3rem, 3.4vw, 1.65rem); font-weight: 600; }
+h3 { font-size: 1.05rem; font-weight: 600; }
+p  { margin: 0; }
+
+a { color: var(--azul); }
+
+.abertura { display: flex; flex-direction: column; gap: 1rem; padding-block: 0 2.25rem; border-bottom: 1px solid var(--linha); }
+.sobrancelha {
+  font-family: var(--mono); font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .14em; color: var(--tinta-fraca);
+}
+.tese { font-size: 1.1rem; color: var(--tinta-fraca); max-width: 42rem; }
+.tese strong { color: var(--tinta); font-weight: 600; }
+
+/* --- passos ------------------------------------------------------------ */
+.passo { display: flex; flex-direction: column; gap: 1.1rem; padding-block: 2.75rem; border-bottom: 1px solid var(--linha); }
+.cabeca { display: flex; align-items: baseline; gap: .85rem; }
+.numero {
+  font-family: var(--mono); font-size: .8rem; font-weight: 600;
+  color: var(--azul); border: 1px solid var(--linha);
+  border-radius: 999px; padding: .15rem .6rem; flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.corpo-passo { display: flex; flex-direction: column; gap: 1rem; }
+.corpo-passo > p { max-width: 40rem; }
+
+/* --- código ------------------------------------------------------------ */
+.bloco { position: relative; }
+pre {
+  font-family: var(--mono); font-size: .82rem; line-height: 1.6;
+  background: var(--superficie); color: var(--tinta);
+  border: 1px solid var(--linha); border-radius: 6px;
+  padding: 1rem 1.1rem; margin: 0; overflow-x: auto;
+}
+code { font-family: var(--mono); font-size: .88em; }
+p code, li code, td code { background: var(--superficie); border: 1px solid var(--linha); border-radius: 3px; padding: .05em .35em; }
+.cm { color: var(--tinta-fraca); }
+.ch { color: var(--azul); }
+.vl { color: var(--ambar); }
+
+.copiar {
+  position: absolute; top: .5rem; right: .5rem;
+  font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  background: var(--papel); color: var(--tinta-fraca);
+  border: 1px solid var(--linha); border-radius: 4px;
+  padding: .25rem .5rem; cursor: pointer;
+}
+.copiar:hover { color: var(--tinta); }
+.copiar:focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+
+/* --- pipeline ---------------------------------------------------------- */
+.trilho { overflow-x: auto; padding-bottom: .5rem; }
+.pipeline { display: grid; grid-template-columns: repeat(5, minmax(9.5rem, 1fr)); gap: .5rem; min-width: 46rem; }
+.etapa {
+  background: var(--superficie); border: 1px solid var(--linha); border-radius: 5px;
+  padding: .8rem .85rem; display: flex; flex-direction: column; gap: .35rem;
+}
+.etapa .t { font-weight: 600; font-size: .9rem; }
+.etapa .d { font-size: .78rem; color: var(--tinta-fraca); line-height: 1.5; }
+.etapa .ms {
+  font-family: var(--mono); font-size: .72rem; color: var(--azul);
+  font-variant-numeric: tabular-nums; margin-top: auto; padding-top: .35rem;
+}
+.orcamento {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--mono); font-size: .72rem; color: var(--tinta-fraca);
+  border-top: 1px solid var(--linha); padding-top: .5rem; margin-top: .5rem;
+  min-width: 46rem;
+}
+
+/* --- tabelas ----------------------------------------------------------- */
+.rolagem { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .87rem; min-width: 30rem; }
+th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--linha); vertical-align: top; }
+th { font-family: var(--mono); font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; color: var(--tinta-fraca); font-weight: 500; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* --- marcas ------------------------------------------------------------ */
+.marca {
+  display: inline-block; font-family: var(--mono); font-size: .7rem;
+  padding: .1rem .45rem; border-radius: 3px; white-space: nowrap;
+}
+.m-oferta { background: var(--ambar-fundo); color: var(--ambar); border: 1px solid var(--ambar); }
+.m-fora   { background: var(--recusa-fundo); color: var(--recusa); border: 1px solid var(--recusa); }
+
+.nota {
+  border-left: 2px solid var(--azul); padding: .1rem 0 .1rem 1rem;
+  color: var(--tinta-fraca); font-size: .92rem; max-width: 40rem;
+}
+.nota strong { color: var(--tinta); font-weight: 600; }
+
+ul.lista { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: .45rem; color: var(--tinta-fraca); max-width: 40rem; }
+ul.lista strong { color: var(--tinta); font-weight: 600; }
+
+.duas { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 640px) { .duas { grid-template-columns: 1fr; } }
+
+.caixa { background: var(--superficie); border: 1px solid var(--linha); border-radius: 6px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: .5rem; }
+.caixa h3 { font-size: .95rem; }
+.caixa p { font-size: .85rem; color: var(--tinta-fraca); }
+
+.rodape { padding-block: 2.5rem 0; color: var(--tinta-fraca); font-size: .85rem; display: flex; flex-direction: column; gap: .6rem; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="envoltorio">
+
+  <header class="abertura">
+    <div class="sobrancelha">Guia de integração · v1</div>
+    <h1>Chamando a Sugestão de Busca</h1>
+    <p class="tese">
+      A pergunta que esta API responde não é “quais palavras completam o que a pessoa digitou”.
+      É <strong>qual oferta apresentar a esta pessoa agora</strong> — com o estado da conta, a faixa
+      de relacionamento e o comportamento dela entrando na decisão, e com o motivo de cada ausência
+      registrado.
+    </p>
+    <p class="tese">
+      São três passos para a primeira chamada. Depois deles, o que acontece por dentro — e os dois
+      campos de evento que deixaram de ser decorativos, que é a parte que mais muda o seu código.
+    </p>
+  </header>
+
+  <!-- 1 -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">01</span><h2>Consiga um token</h2></div>
+    <div class="corpo-passo">
+      <p>
+        Todas as rotas são protegidas. O serviço é servidor de recurso OAuth 2.0: ele
+        <em>valida</em> o token e não emite nenhum. Em produção quem emite é o provedor de
+        identidade; em desenvolvimento, um script fora da aplicação.
+      </p>
+
+      <div class="bloco">
+        <button class="copiar" data-copiar="tok">copiar</button>
+<pre id="tok"><span class="cm"># o app, em nome de uma pessoa</span>
+.\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado
+
+<span class="cm"># uma jornada de produto, dona das próprias ofertas</span>
+.\scripts\gerar-token.ps1 -Tipo jornada -Jornada credito</pre>
+      </div>
+
+      <p>Há dois tipos de chamador, e a diferença decide o que você pode fazer.</p>
+
+      <div class="rolagem">
+        <table>
+          <thead>
+            <tr><th>chamador</th><th>reivindicações no token</th><th>escopos</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>cliente</strong><br><span style="color:var(--tinta-fraca);font-size:.82rem">o app, por uma pessoa</span></td>
+              <td class="n">sub<br>segmento<br>relacionamento</td>
+              <td class="n">sugestao:ler<br>eventos:escrever</td>
+            </tr>
+            <tr>
+              <td><strong>jornada</strong><br><span style="color:var(--tinta-fraca);font-size:.82rem">um serviço de produto</span></td>
+              <td class="n">jornada</td>
+              <td class="n">ofertas:escrever<br>ofertas:ler</td>
+            </tr>
+            <tr>
+              <td><strong>operação</strong><br><span style="color:var(--tinta-fraca);font-size:.82rem">carga de catálogo e ops</span></td>
+              <td class="n">—</td>
+              <td class="n">ofertas:todas<br>aprendizado:executar<br>metricas:ler</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="nota">
+        <strong><code>ofertas:todas</code> e <code>metricas:ler</code> têm nome próprio de propósito.</strong>
+        O primeiro é o privilégio de cadastrar em qualquer jornada; o segundo lê a métrica de
+        qualidade de busca, que não carrega prefixo nem cliente mas carrega a <em>forma</em> do
+        serviço — taxa de zero-resultado por faixa de prefixo e volume de descarte por motivo contam
+        a quem perguntar onde este serviço é frágil e quais produtos pouca gente pode contratar.
+        Numa auditoria, procurar quem recebe cada um é uma busca de uma linha.
+      </div>
+
+      <div class="nota">
+        <strong>Segmento e faixa vêm no token, não no corpo nem em cabeçalho.</strong>
+        Não é detalhe de autenticação: eles são atributos de coorte, conhecidos antes de qualquer
+        leitura de perfil, e é isso que permite a consulta ao índice arrancar junto da leitura do
+        perfil em vez de atrás dela. É o que faz o orçamento de 30 ms fechar — e agora eles vêm
+        provados, não ditos.
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">02</span><h2>Faça a requisição</h2></div>
+    <div class="corpo-passo">
+      <div class="bloco">
+        <button class="copiar" data-copiar="req">copiar</button>
+<pre id="req">curl -s <span class="vl">"http://localhost:8080/v1/sugestoes?q=emprestim"</span> \
+     -H <span class="vl">"Authorization: Bearer $TOKEN"</span></pre>
+      </div>
+
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>parâmetro</th><th>o que faz</th></tr></thead>
+          <tbody>
+            <tr><td class="n">q</td><td>o prefixo digitado, cru. A normalização é regra de domínio e acontece dentro.</td></tr>
+            <tr><td class="n">limite</td><td>opcional. Pedir <code>N</code> devolve <strong>exatamente os N primeiros</strong> de pedir o máximo: o teto corta o fim da lista, nunca reordena o começo.</td></tr>
+            <tr><td class="n">explicar</td><td>opcional, e desligado em produção. Devolve o rastro da decisão — inclusive os descartes, que dizem quais produtos o cliente não pode contratar.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="nota">
+        <strong>Esta rota não devolve erro de aplicação.</strong> Prefixo de um caractere,
+        <code>q</code> ausente, <code>limite=NaN</code>, faixa inexistente — tudo isso é
+        <code>200</code> com lista vazia, limitada ou degradada. Escreva tratamento de
+        <strong>lista vazia</strong>, não de <code>4xx</code>. Há duas fronteiras, e as duas são do
+        servidor: acima de ~7,9&nbsp;KB de URL o container responde <code>400</code> antes de a
+        aplicação existir, e acima do limite de taxa vem <code>429</code>.
+      </div>
+
+      <h3 style="margin-top:.5rem">O limite de taxa, e o que fazer com ele</h3>
+      <p>
+        Toda resposta traz os cabeçalhos — não só o <code>429</code>. Um cliente que só descobre o
+        limite ao ser recusado não tem como se comportar antes.
+      </p>
+
+      <div class="bloco">
+        <button class="copiar" data-copiar="rl">copiar</button>
+<pre id="rl"><span class="ch">RateLimit-Limit</span>:     600
+<span class="ch">RateLimit-Remaining</span>: 412   <span class="cm">// aumente o debounce quando a sobra encolher</span>
+<span class="ch">RateLimit-Reset</span>:     38
+
+<span class="cm">// estourou:</span>
+HTTP 429  application/problem+json
+<span class="ch">Retry-After</span>: 50           <span class="cm">// obedeça. Tentar em laço piora o que o limite contém.</span></pre>
+      </div>
+
+      <div class="nota">
+        <strong>600 por minuto é calibrado para deixar a pessoa digitar</strong>, não para impedir
+        raspagem: quem digita “financiamento imobiliário” rápido gasta ~25 requisições em segundos.
+        Com <code>debounce</code> de 120&nbsp;ms e <code>AbortController</code>, um usuário real não
+        chega perto do teto. Se o seu cliente chega, o problema é o cliente — provavelmente uma
+        requisição por tecla sem cancelar a anterior.
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">03</span><h2>Leia a resposta</h2></div>
+    <div class="corpo-passo">
+      <div class="bloco">
+        <button class="copiar" data-copiar="resp">copiar</button>
+<pre id="resp">{
+  <span class="ch">"prefixo"</span>: <span class="vl">"emprestim"</span>,
+  <span class="ch">"degradada"</span>: false,            <span class="cm">// o perfil não carregou</span>
+
+  <span class="ch">"melhorOferta"</span>: {             <span class="cm">// ausente quando não há oferta elegível</span>
+    <span class="ch">"ofertaId"</span>:    <span class="vl">"OFR-CREDITO-EMPRESTIMO"</span>,
+    <span class="ch">"produtoAlvo"</span>: <span class="vl">"EMPRESTIMO"</span>,
+    <span class="ch">"jornada"</span>:     <span class="vl">"credito"</span>,
+    <span class="ch">"posicao"</span>:     0,            <span class="cm">// liga a resposta à impressão</span>
+    <span class="ch">"relevancia"</span>:  2.0
+  },
+
+  <span class="ch">"itens"</span>: [
+    { <span class="ch">"posicao"</span>: 0, <span class="ch">"ofertaId"</span>: <span class="vl">"OFR-CREDITO-EMPRESTIMO"</span>,
+      <span class="ch">"termo"</span>: <span class="vl">"empréstimo pessoal"</span>, <span class="ch">"origem"</span>: <span class="vl">"CATALOGO"</span>, <span class="ch">"relevancia"</span>: 2.0 },
+    { <span class="ch">"posicao"</span>: 1, <span class="ch">"ofertaId"</span>: <span class="vl">""</span>,          <span class="cm">// "" = não é oferta</span>
+      <span class="ch">"termo"</span>: <span class="vl">"contratar emprestimo"</span>, <span class="ch">"origem"</span>: <span class="vl">"POPULAR"</span>, <span class="ch">"relevancia"</span>: 0.15 }
+  ]
+}</pre>
+      </div>
+
+      <div class="duas">
+        <div class="caixa">
+          <h3><span class="marca m-oferta">melhorOferta</span></h3>
+          <p>
+            A oferta acionável de maior ranking <strong>entre as entregues</strong>. É redundante de
+            propósito: sem ela, você varreria <code>itens</code>, adivinharia que oferta é o item com
+            <code>ofertaId</code> preenchido, e confiaria que a ordem do array é o ranking. Três
+            suposições sobre a nossa implementação, dentro do seu código.
+          </p>
+        </div>
+        <div class="caixa">
+          <h3>Ausente não é erro</h3>
+          <p>
+            Significa que para esta pessoa e este prefixo <strong>não há oferta elegível</strong> —
+            conta em atraso, produto já contratado, sem elegibilidade, ou fora da faixa. Não insista
+            com outro prefixo: a ausência é a resposta.
+          </p>
+        </div>
+      </div>
+
+      <div class="nota">
+        <strong>Não case nada contra <code>relevancia</code>.</strong> Ela vive entre ~0,1 e 3,6, o
+        teto é configurável e os fatores que a compõem mudam entre versões — um cliente que testa
+        <code>relevancia &gt; 2</code> para decidir se destaca a oferta quebra na próxima calibração.
+        Use a <strong>posição</strong>: o <code>itens[0]</code> é o melhor que o ranking tinha, e
+        <code>melhorOferta</code> é a melhor oferta acionável. O número está na resposta para ser
+        inspecionado, não para ser comparado.
+      </div>
+
+      <div class="nota">
+        <strong>E ela pode descer.</strong> Desde a rodada do sinal negativo, uma linha que esta
+        pessoa viu muitas vezes e nunca clicou é <em>rebaixada</em> — até 40% abaixo do que teria. É
+        o único sinal do sistema que rebaixa, e existe porque sem ele o ranking só sabe concordar
+        consigo mesmo: o <code>ctr</code> do índice mede a <strong>população</strong>, não esta
+        pessoa. Para o seu código isso não muda nada; para a sua intuição ao ler dois números
+        parecidos, muda.
+      </div>
+
+      <h3 style="margin-top:.5rem">O que cada origem significa</h3>
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>origem</th><th>de onde veio</th><th>na tela</th></tr></thead>
+          <tbody>
+            <tr><td class="n">EVENTO</td><td>gatilho recente no perfil (Pix recusado há duas horas)</td><td>merece destaque; tem cota de uma linha e abre a lista</td></tr>
+            <tr><td class="n">HISTORICO</td><td>o que esta pessoa já buscou</td><td>ícone de relógio</td></tr>
+            <tr><td class="n">CATALOGO</td><td>oferta curada ou cadastrada por uma jornada</td><td>a linha que carrega <code>ofertaId</code></td></tr>
+            <tr><td class="n">POPULAR</td><td>o que gente de coorte parecida busca</td><td>sugestão de texto, sem produto</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- pipeline -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">04</span><h2>O que acontece por dentro</h2></div>
+    <div class="corpo-passo">
+      <p>
+        Entre o <code>GET</code> e a resposta há cinco etapas, e a ordem não é intercambiável. O
+        orçamento inteiro é de 30&nbsp;ms, contado do início da requisição.
+      </p>
+
+      <div class="trilho">
+        <div class="pipeline">
+          <div class="etapa">
+            <div class="t">Leque</div>
+            <div class="d">Índice e perfil são lidos <strong>ao mesmo tempo</strong>, em threads virtuais. Sem nova tentativa: a próxima tecla já vem a caminho.</div>
+            <div class="ms">18 ms índice · 8 ms perfil</div>
+          </div>
+          <div class="etapa">
+            <div class="t">Classificar</div>
+            <div class="d">Gatilho ativo no perfil promove um candidato a <code>EVENTO</code>. Cota de uma linha: ele é oportuno, não dominante.</div>
+            <div class="ms">CPU</div>
+          </div>
+          <div class="etapa">
+            <div class="t">Peneira</div>
+            <div class="d">O perfil remove o que o cliente não pode contratar — e registra o motivo. <strong>Booleano, não peso.</strong></div>
+            <div class="ms">~2 ms</div>
+          </div>
+          <div class="etapa">
+            <div class="t">Ranquear</div>
+            <div class="d">Normaliza a escala, elege a jornada líder, aplica a afinidade desta pessoa. Só promove, nunca rebaixa.</div>
+            <div class="ms">CPU</div>
+          </div>
+          <div class="etapa">
+            <div class="t">Misturar</div>
+            <div class="d">Deduplica, reserva a linha do evento, respeita a cota do histórico, corta no limite.</div>
+            <div class="ms">CPU</div>
+          </div>
+        </div>
+        <div class="orcamento"><span>início da requisição</span><span>teto total · 30 ms</span></div>
+      </div>
+
+      <div class="nota">
+        <strong>Elegibilidade não é nota baixa — é remoção.</strong> Se fosse peso, um prefixo muito
+        casado faria a oferta vetada subir de volta. Então a melhor oferta não é a de maior nota: é a
+        de maior nota <em>entre as que sobreviveram aos portões</em>, e os portões vêm antes.
+      </div>
+
+      <h3>A conta do ranking</h3>
+      <div class="bloco">
+<pre><span class="cm">relevancia_final = relevancia_normalizada × fator</span>
+
+fator = 1.00
+      × 1.60   <span class="cm">se a jornada do candidato é a líder</span>
+      × 1.25   <span class="cm">e, dentro dela, se ele empurra um produto</span>
+      × (1 + afinidade × 0.5)   <span class="cm">afinidade desta pessoa, 0 a 1</span>
+
+<span class="cm">teto: 1.60 × 1.25 × 1.50 = 3.00</span></pre>
+      </div>
+
+      <p>
+        Os números que você vê na resposta <em>são</em> essa fórmula. A relevância normalizada do
+        primeiro colocado é sempre 1,0, então:
+      </p>
+
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>linha observada</th><th>conta</th></tr></thead>
+          <tbody>
+            <tr><td class="n">r=2,0</td><td class="n">1,0 × 1,6 × 1,25 — líder + produto, sem afinidade</td></tr>
+            <tr><td class="n">r=3,0</td><td class="n">1,0 × 1,6 × 1,25 × 1,5 — a mesma pessoa, já com afinidade</td></tr>
+            <tr><td class="n">r=0,15</td><td class="n">termo do log: normalizado e <strong>sem fator nenhum</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="nota">
+        O comportamento é <strong>lido</strong> dentro da requisição, não mapeado. A afinidade que
+        entra no fator foi calculada antes, por outra rodada. Mapear acontece <em>entre</em> uma
+        busca e a próxima — porque o sinal que mais vale, o clique, acontece depois da resposta.
+      </div>
+    </div>
+  </section>
+
+  <!-- descartes -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">05</span><h2>Por que uma oferta não apareceu</h2></div>
+    <div class="corpo-passo">
+      <p>
+        Com <code>?explicar=true</code>, cada ausência vem com motivo. Numa camada de sugestão, a
+        pergunta que chega do negócio quase nunca é por que uma linha apareceu — é por que a outra
+        não apareceu.
+      </p>
+
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>motivo</th><th>o que aconteceu</th></tr></thead>
+          <tbody>
+            <tr><td><span class="marca m-fora">CONTA_INADIMPLENTE</span></td><td>crédito novo para quem está em atraso. O caminho certo para essa pessoa é a renegociação, que entra por gatilho.</td></tr>
+            <tr><td><span class="marca m-fora">CONTA_NAO_OPERANTE</span></td><td>operação que exige conta ativa. Conta desconhecida cai aqui junto com a bloqueada: falha fechada.</td></tr>
+            <tr><td><span class="marca m-fora">SEM_ELEGIBILIDADE</span></td><td>sem concessão explícita, a oferta não aparece.</td></tr>
+            <tr><td><span class="marca m-fora">PRODUTO_JA_CONTRATADO</span></td><td>não se oferece de novo o que a pessoa já tem.</td></tr>
+            <tr><td><span class="marca m-fora">ABAIXO_DO_PISO</span></td><td>termo do log buscado por menos de 30 clientes distintos. Devolvê-lo contaria algo sobre quem o buscou.</td></tr>
+            <tr><td><span class="marca m-fora">COTA_DE_HISTORICO</span><br><span class="marca m-fora">ALEM_DO_LIMITE</span></td><td>coube na peneira, não coube na lista.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="nota">
+        <strong>Em produção <code>explicar</code> fica desligado.</strong> A lista de descartes diz
+        quais produtos aquele cliente não pode contratar, e isso é informação sobre a pessoa, não
+        sobre a busca. A leitura do parâmetro falha fechada: só <code>true</code> e <code>1</code>
+        ligam.
+      </div>
+    </div>
+  </section>
+
+  <!-- tolerancia -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">06</span><h2>Quando a pessoa erra a digitação</h2></div>
+    <div class="corpo-passo">
+      <p>
+        Uma letra errada zerava a lista. Em teclado de celular, isso é a maioria dos casos ruins — e
+        não é um caso de borda: <code>emprestmo</code>, <code>enprestimo</code> e
+        <code>consignadu</code> devolviam <strong>zero itens</strong>.
+      </p>
+
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>prefixo</th><th>antes</th><th>agora</th><th><code>explicacao.tolerancia</code></th></tr></thead>
+          <tbody>
+            <tr><td class="n">emprestimo</td><td class="n">4</td><td class="n">4</td><td class="n">NAO_PRECISOU</td></tr>
+            <tr><td class="n">emprestmo</td><td class="n">0</td><td class="n">4</td><td class="n">ACIONADA_COM_GANHO</td></tr>
+            <tr><td class="n">enprestimo</td><td class="n">0</td><td class="n">4</td><td class="n">ACIONADA_COM_GANHO</td></tr>
+            <tr><td class="n">consignadu</td><td class="n">0</td><td class="n">3</td><td class="n">ACIONADA_COM_GANHO</td></tr>
+            <tr><td class="n">car</td><td class="n">8</td><td class="n">8</td><td class="n">NAO_ELEGIVEL</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="duas">
+        <div class="caixa">
+          <h3>Custa zero quando não precisa</h3>
+          <p>
+            É uma <strong>segunda consulta</strong>, disparada só quando a primeira trouxe menos de
+            três candidatos. Como cláusula na primeira, o fuzzy iria para os campos de prefixo — onde
+            cada palavra já está expandida em dezenas de gramas — e <em>toda</em> busca pagaria por um
+            recurso que só importa quando a busca falhou.
+          </p>
+        </div>
+        <div class="caixa">
+          <h3>Mínimo de 5 letras</h3>
+          <p>
+            Com quatro, distância de edição 1 alcança um vizinho enorme: <code>card</code> casa
+            <code>carro</code> e <code>cara</code>. Lista errada com confiança é pior que lista vazia
+            — oferecer consórcio a quem digitou “consignado” torto não é recuperação simpática, é
+            produto errado.
+          </p>
+        </div>
+      </div>
+
+      <div class="nota">
+        <strong>Isto conserta erro de digitação, não falta de vocabulário.</strong>
+        <code>grana</code> continua devolvendo zero, e nenhuma distância de edição conserta sinônimo
+        que não existe no catálogo. Se o seu público usa um termo que a lista não conhece, o caminho
+        é cadastrar o sinônimo — não esperar que a busca adivinhe.
+      </div>
+
+      <div class="nota">
+        <strong>Para o seu código, nada muda.</strong> O campo <code>tolerancia</code> aparece só com
+        <code>explicar=true</code>, e está lá para diagnóstico: <code>ACIONADA_SEM_GANHO</code>
+        repetido num prefixo é sinal de vocabulário faltando, não de busca quebrada.
+      </div>
+    </div>
+  </section>
+
+  <!-- registrar eventos -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">07</span><h2>Devolva o que aconteceu</h2></div>
+    <div class="corpo-passo">
+      <p>
+        A busca não registra nada por conta própria — a leitura nunca escreve. É o app que manda
+        impressão, clique e adesão, e é <strong>a impressão com posição</strong> que torna o
+        aprendizado possível: sem ela o modelo aprende que a primeira linha é a melhor, quando ela é
+        apenas onde a linha estava.
+      </p>
+
+      <div class="bloco">
+        <button class="copiar" data-copiar="ev">copiar</button>
+<pre id="ev">POST /v1/eventos          <span class="cm">→ 202, e acabou. Ninguém espera.</span>
+Authorization: Bearer $TOKEN_DO_CLIENTE
+
+[
+  { <span class="ch">"tipo"</span>: <span class="vl">"BUSCA_DIGITADA"</span>,   <span class="ch">"termo"</span>: <span class="vl">"emprestimo pessoal"</span> },
+
+  <span class="cm">// TODOS os termos que ficaram na tela, não só o clicado</span>
+  { <span class="ch">"tipo"</span>: <span class="vl">"SUGESTAO_EXIBIDA"</span>, <span class="ch">"termosExibidos"</span>: [<span class="vl">"empréstimo pessoal"</span>,
+                                          <span class="vl">"crédito consignado"</span>],
+    <span class="ch">"listaDegradada"</span>: false },
+
+  <span class="cm">// "produto" não é opcional de verdade: ver abaixo</span>
+  { <span class="ch">"tipo"</span>: <span class="vl">"SUGESTAO_CLICADA"</span>, <span class="ch">"termo"</span>: <span class="vl">"empréstimo pessoal"</span>,
+    <span class="ch">"posicao"</span>: 0, <span class="ch">"jornada"</span>: <span class="vl">"credito"</span>,
+    <span class="ch">"produto"</span>: <span class="vl">"EMPRESTIMO"</span> }
+]</pre>
+      </div>
+
+      <div class="nota">
+        <strong>Dois campos deixaram de ser decorativos, e é a mudança mais acionável deste guia.</strong>
+      </div>
+
+      <div class="duas">
+        <div class="caixa">
+          <h3><code>produto</code> no clique</h3>
+          <p>
+            Sempre existiu no contrato e não era lido por nada. Agora ele é o que distingue
+            <strong>consignado de empréstimo</strong>: os dois são da jornada <code>credito</code>, e
+            sem este campo clicar num promove o outro na mesma medida. Mandar só
+            <code>jornada</code> faz a personalização parar no nível “esta pessoa quer crédito”, sem
+            nunca chegar em “e quer consignado”.
+          </p>
+        </div>
+        <div class="caixa">
+          <h3><code>termosExibidos</code> completo</h3>
+          <p>
+            Antes servia só de denominador do CTR agregado. Agora é o que alimenta o sinal negativo:
+            linha exibida muitas vezes e nunca clicada perde posição <strong>para esta pessoa</strong>.
+            Mandar apenas o termo clicado inverte o significado — o sistema passa a achar que nada
+            mais foi mostrado, e nada nunca é rebaixado.
+          </p>
+        </div>
+      </div>
+
+      <ul class="lista">
+        <li><strong>Não existe <code>clienteId</code> no corpo.</strong> Ele vem do <code>sub</code> do token. Aceitá-lo no corpo deixaria qualquer chamador escrever comportamento em nome de qualquer pessoa — e como é esse identificador que a agregação conta para medir clientes distintos, quem controlasse o corpo controlaria o piso de k-anonimato.</li>
+        <li><strong>Mande <code>listaDegradada</code> junto.</strong> Quando a resposta veio com <code>degradada: true</code> o perfil não carregou, e registrar aquela impressão como personalizada ensina ruído ao aprendizado.</li>
+        <li><strong>Use <code>keepalive</code> no clique.</strong> O clique navega; sem ele o navegador cancela a requisição ao trocar de página, e é justamente o sinal mais valioso que se perde.</li>
+        <li><strong>Busca não vira afinidade.</strong> Clique vale 2 pontos, adesão vale 5, busca vale zero — quem procura entender um produto não é quem o quer.</li>
+        <li><strong>O sistema não acredita no primeiro clique, nem na primeira impressão.</strong> Um clique dá 0,33 de afinidade de jornada, não o máximo. E cinco impressões sem clique não rebaixam nada: sem esse piso, oferta nova receberia impressão, ainda não teria clique, seria penalizada, afundaria e nunca chegaria a receber o clique que a tiraria da penalidade.</li>
+        <li><strong>Um clique zera a fadiga — não desconta.</strong> A pergunta que ela responde é “esta pessoa ignora esta linha?”, e um clique responde não, independentemente de quantas impressões vieram antes.</li>
+      </ul>
+
+      <div class="nota">
+        <strong>Não há como mandar evento com data no passado.</strong> O <code>ocorridoEm</code> é
+        atribuído pelo servidor na ingestão, de propósito: relógio de aparelho erra, e um evento
+        adiantado renderia mais que um honesto. A consequência para quem testa é que
+        <em>reproduzir um histórico de trinta dias pela API é impossível</em> — as janelas longas só
+        se observam deixando o tempo passar, ou nos testes de unidade, que injetam relógio.
+      </div>
+    </div>
+  </section>
+
+  <!-- cadastrar oferta -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">08</span><h2>Cadastre a oferta da sua jornada</h2></div>
+    <div class="corpo-passo">
+      <p>
+        É o lado de escrita do catálogo, e ele tem o perfil de falha oposto ao da busca: cada recusa
+        é informação que você precisa receber inteira. Precisa de um token de <strong>jornada</strong>.
+      </p>
+
+      <div class="bloco">
+        <button class="copiar" data-copiar="of">copiar</button>
+<pre id="of">POST /v1/ofertas          <span class="cm">→ 201 criada · 200 substituída, + Location</span>
+
+{
+  <span class="ch">"ofertaId"</span>:    <span class="vl">"OFR-CREDITO-CONSORCIO"</span>,
+  <span class="ch">"termo"</span>:       <span class="vl">"consórcio de imóvel"</span>,
+  <span class="ch">"sinonimos"</span>:   [<span class="vl">"consorcio"</span>, <span class="vl">"carta de credito"</span>],
+  <span class="ch">"destino"</span>:     <span class="vl">"/app/credito/consorcio"</span>,   <span class="cm">// relativo, sempre</span>
+  <span class="ch">"jornada"</span>:     <span class="vl">"credito"</span>,                   <span class="cm">// conferida contra o token</span>
+  <span class="ch">"produtoAlvo"</span>: <span class="vl">"CONSORCIO_IMOVEL"</span>,
+  <span class="ch">"vetaInadimplencia"</span>: true,
+  <span class="ch">"segmentos"</span>:       [<span class="vl">"PF"</span>],
+  <span class="ch">"relacionamentos"</span>: [<span class="vl">"VAREJO"</span>, <span class="vl">"UNICLASS"</span>],
+  <span class="ch">"vigenciaInicio"</span>: <span class="vl">"2026-10-01T00:00:00Z"</span>,
+  <span class="ch">"vigenciaFim"</span>:    <span class="vl">"2027-10-01T00:00:00Z"</span>
+}</pre>
+      </div>
+
+      <div class="duas">
+        <div class="caixa">
+          <h3>O que o cadastro recusa</h3>
+          <p>
+            <code>ctr</code>, <code>taxaAdesao</code>, <code>clientesDistintos</code>. São os números
+            que mais mexem no ranking e nenhum é declarável — eles são medidos a partir de impressão
+            e clique reais. Se o cadastro os aceitasse, o ranking mediria a confiança de quem
+            preenche formulário.
+          </p>
+        </div>
+        <div class="caixa">
+          <h3>A oferta nasce visível</h3>
+          <p>
+            Com os quatro contadores em zero, e aparece na busca no mesmo instante. O piso de
+            k-anonimato vale só para termo vindo do log: não há ninguém para reidentificar num nome
+            de produto.
+          </p>
+        </div>
+      </div>
+
+      <div class="nota">
+        <strong>O escopo diz que você pode cadastrar; a jornada diz o quê.</strong>
+        <code>ofertas:escrever</code> autoriza cadastrar alguma coisa; a reivindicação
+        <code>jornada</code> do token diz o quê. Cadastrar na jornada de outro time dá
+        <code>403</code>, com o seu token válido — sem isso, seguros publicaria oferta de crédito
+        com rótulo e destino escolhidos por ela.
+      </div>
+
+      <h3>Erro de cadastro: todas as violações de uma vez</h3>
+      <div class="bloco">
+<pre>HTTP 422 · application/problem+json
+
+{
+  <span class="ch">"type"</span>: <span class="vl">"https://sugestao-busca.dev/problemas/oferta-invalida"</span>,
+  <span class="ch">"detail"</span>: <span class="vl">"3 campos recusados"</span>,
+  <span class="ch">"violacoes"</span>: [
+    { <span class="ch">"campo"</span>: <span class="vl">"destino"</span>, <span class="ch">"codigo"</span>: <span class="vl">"formato"</span>,
+      <span class="ch">"mensagem"</span>: <span class="vl">"caminho relativo comecando com '/', sem esquema e sem '//'"</span> },
+    { <span class="ch">"campo"</span>: <span class="vl">"segmentos"</span>, <span class="ch">"codigo"</span>: <span class="vl">"fora_do_dominio"</span>,
+      <span class="ch">"mensagem"</span>: <span class="vl">"valor 'PESSOA_FISICA' nao reconhecido; aceitos: PF, PJ"</span> },
+    { <span class="ch">"campo"</span>: <span class="vl">"vigenciaFim"</span>, <span class="ch">"codigo"</span>: <span class="vl">"ordem_invalida"</span>,
+      <span class="ch">"mensagem"</span>: <span class="vl">"deve ser posterior a vigenciaInicio"</span> }
+  ]
+}</pre>
+      </div>
+      <p>
+        Case contra <code>codigo</code>, nunca contra <code>mensagem</code>: a redação muda quando
+        melhora, o código é contrato. E a lista vem completa de propósito — recusar no primeiro
+        problema transformaria a integração numa sequência de tentativas, uma por campo.
+      </p>
+    </div>
+  </section>
+
+  <!-- status -->
+  <section class="passo">
+    <div class="cabeca"><span class="numero">09</span><h2>Os códigos de resposta</h2></div>
+    <div class="corpo-passo">
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>código</th><th>quando</th><th>o que fazer</th></tr></thead>
+          <tbody>
+            <tr><td class="n" style="color:var(--ok)">200 / 201</td><td>sucesso. <code>201</code> no cadastro criou; <code>200</code> substituiu.</td><td>um <code>200</code> onde esperava <code>201</code> avisa que o identificador colidiu</td></tr>
+            <tr><td class="n" style="color:var(--ok)">202</td><td>eventos aceitos na fila</td><td>nada; ninguém está esperando</td></tr>
+            <tr><td class="n">400</td><td>não consegui ler o que você mandou</td><td>corrigir o serializador</td></tr>
+            <tr><td class="n">401</td><td>token ausente, expirado ou inválido</td><td>renovar o token</td></tr>
+            <tr><td class="n">403</td><td>escopo insuficiente, <strong>ou</strong> oferta de outra jornada</td><td><code>type</code> distingue os dois casos</td></tr>
+            <tr><td class="n">404</td><td>oferta não cadastrada</td><td>conferir o identificador</td></tr>
+            <tr><td class="n">415</td><td><code>Content-Type</code> não suportado</td><td>mandar <code>application/json</code></td></tr>
+            <tr><td class="n">422</td><td>li perfeitamente e recusei</td><td>corrigir o <em>valor</em>, com a lista de violações</td></tr>
+            <tr><td class="n">429</td><td>limite de taxa estourado</td><td>respeitar <code>Retry-After</code>; se acontece com usuário real, o <code>debounce</code> está frouxo</td></tr>
+            <tr><td class="n">503</td><td>índice indisponível no cadastro</td><td>reenviar; o cadastro é idempotente por <code>ofertaId</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="nota">
+        A diferença entre <code>400</code> e <code>422</code> poupa tempo: o primeiro diz que a
+        correção é no serializador, o segundo que é no valor. E <code>403</code> em rota que não
+        existe não é engano: toda rota nasce fechada, e de passagem não se conta a quem sonda quais
+        caminhos existem.
+      </div>
+    </div>
+  </section>
+
+  <!-- checklist -->
+  <section class="passo" style="border-bottom:none">
+    <div class="cabeca"><span class="numero">10</span><h2>Antes de ir para produção</h2></div>
+    <div class="corpo-passo">
+      <ul class="lista">
+        <li><strong>CORS.</strong> Sem a origem do seu app autorizada, a API responde normalmente a <code>curl</code> e é bloqueada pelo navegador — o <code>200</code> chega e o JavaScript nunca vê o corpo. No DevTools isso aparece como erro de rede, o que manda investigar o lugar errado. E <code>localhost</code> e <code>127.0.0.1</code> são origens <em>diferentes</em>.</li>
+        <li><strong>Debounce de ~150 ms.</strong> Dez teclas não são dez requisições.</li>
+        <li><strong>Resposta fora de ordem.</strong> A de <code>cons</code> pode chegar depois da de <code>consignado</code> e sobrescrever a lista certa. Em rede local quase nunca acontece; em 4G acontece sempre. Cancelar ajuda e <em>não</em> resolve — o cancelamento é uma corrida. Compare o campo <code>prefixo</code> que volta com o que está no campo agora: ele existe para isso.</li>
+        <li><strong>Mínimo de 2 caracteres no cliente</strong>, para não gastar ida e volta.</li>
+        <li><strong>Lista vazia é “nada a mostrar”</strong>, nunca falha.</li>
+        <li><strong>Conjunto de cabeçalhos estável.</strong> Mudar o conjunto entre requisições invalida o cache do preflight, e aí cada busca vira duas.</li>
+        <li><strong>Mande <code>produto</code> no clique e <code>termosExibidos</code> completo.</strong> São os dois campos que deixaram de ser decorativos. Sem o primeiro, a personalização nunca passa do nível da jornada; sem o segundo, o sinal negativo nunca age.</li>
+        <li><strong>Leia <code>RateLimit-Remaining</code>.</strong> É o aviso antes do <code>429</code>, e dá para aumentar o <code>debounce</code> quando a sobra encolher.</li>
+      </ul>
+
+      <div class="nota">
+        <strong>O que vale medir do seu lado.</strong> O serviço expõe taxa de zero-resultado,
+        distribuição da posição clicada e volume de descarte por motivo em
+        <code>/actuator/metrics</code>, com escopo <code>metricas:ler</code>. Dois números dali valem
+        olhar na sua integração: se a <strong>posição clicada</strong> concentra em 3 e 4 em vez de 0
+        e 1, as duas primeiras linhas estão ocupando lugar que não merecem; e se
+        <code>SEM_OFERTA</code> cresce, as pessoas estão encontrando texto e não produto.
+      </div>
+    </div>
+  </section>
+
+  <footer class="rodape">
+    <p>
+      Medido nesta implementação: p50 de 9,9&nbsp;ms e p99 de 32&nbsp;ms; 546&nbsp;req/s com 40
+      chamadas em paralelo e nenhuma falha, em 400 requisições. Cliente, serviço e índice na mesma
+      máquina — serve para comparar mudanças, não para dimensionar capacidade.
+    </p>
+    <p>
+      Verificado: 167 testes de unidade, 56 asserções de contrato e 47 sondas adversariais, mais um
+      caçador de teste instável que roda a suíte sob contenção de CPU —
+      <code>scripts/cacar-flaky.ps1</code>. Três asserções deste projeto afirmavam igualdade exata
+      sobre valor decaído e passavam por sorte; a última só apareceu com os doze núcleos ocupados.
+    </p>
+    <p>
+      O raciocínio por trás de cada decisão, com o que foi recusado e por quê, está em
+      <code>docs/decisoes.md</code>. Este guia é <code>docs/guia-api.html</code> no repositório.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('.copiar').forEach(function (botao) {
+    botao.addEventListener('click', function () {
+      var alvo = document.getElementById(botao.dataset.copiar);
+      if (!alvo) return;
+      var texto = alvo.innerText;
+      var confirmar = function () {
+        var antes = botao.textContent;
+        botao.textContent = 'copiado';
+        setTimeout(function () { botao.textContent = antes; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(confirmar, function () { selecionar(alvo); });
+      } else {
+        selecionar(alvo);
+      }
+    });
+  });
+
+  function selecionar(elemento) {
+    var faixa = document.createRange();
+    faixa.selectNodeContents(elemento);
+    var selecao = window.getSelection();
+    selecao.removeAllRanges();
+    selecao.addRange(faixa);
+  }
+</script>

@@ -947,6 +947,7 @@ src/main/java/dev/sugestao/busca/
 
 docs/decisoes.md               as decisões, com o que foi recusado e por quê
 docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respostas
+docs/guia-api.html             guia de integração em 10 passos (abre no navegador)
 
 requisicoes/sugestoes.http     REST Client do VS Code, agrupado por pergunta
 requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
@@ -963,6 +964,7 @@ scripts/semear-vocabulario.ps1 vocabulário sintético
 scripts/conferir-piso.ps1      portão de publicação: k-anonimato e zero-resultado
 scripts/gerar-token.ps1        JWT de desenvolvimento, FORA da aplicação
 scripts/limpar-ofertas-de-teste.ps1  remove do índice o que o teste manual criou
+scripts/cacar-flaky.ps1        roda a suíte sob contenção, caçando teste instável
 solr/schema-sugestoes.json     payload da Schema API
 solr/schema-tolerancia.json    só o delta da tolerância, aplicável sobre o acima
 solr/README.md                 por que cada campo existe

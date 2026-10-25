@@ -865,6 +865,55 @@ marcar "limite de taxa" como resolvido.**
 
 ---
 
+## 22. Relógio injetado, porque três asserções passavam por sorte
+
+**Decisão.** `AgregadosEmMemoria` recebe um `Clock`. Em produção é
+`Clock.systemUTC()`; nos testes é `Clock.fixed`.
+
+**O que isso conserta.** Com `Instant.now()` chamado dentro da classe, um evento
+criado no teste e agregado alguns microssegundos depois tem idade maior que zero, e
+o decaimento a desconta: três cliques "de agora" dão 5,999999993 pontos em vez de
+6,0, e a afinidade sai `0,9999999996` em vez de `1,0`.
+
+**Três asserções afirmavam igualdade exata nessa borda.** Duas apareceram quando
+o código ficou marginalmente mais lento e passou a cruzar a virada do
+milissegundo. A terceira — `normalizaAJornada` — só apareceu rodando a suíte
+**doze vezes com os doze núcleos ocupados**: doze rodadas numa máquina ociosa
+passaram doze vezes.
+
+**Recusado: afrouxar a tolerância.** Foi o que fiz primeiro, e funciona. O custo é
+escondido: `within(1e-6)` também aceita um **erro de verdade** de 1e-6, e o teste
+passa a afirmar menos do que queria. Pior no caso de
+`cadenciaNaoMudaOResultado`, cuja afirmação é "rodar a agregação uma vez ou cem
+vezes dá a mesma resposta" — com relógio real isso é **falso de direito**, porque a
+idade cresce entre as chamadas, e o teste só podia verificar uma aproximação. Com
+relógio fixo ele volta a poder dizer `isEqualTo`, que é o que significa.
+
+**O relógio tem de ser fixo nos dois lados.** Agregador com relógio fixo e evento
+nascendo em `Instant.now()` não determina nada — a idade continua variável. Os
+testes passaram a criar os eventos a partir da mesma constante.
+
+**O que continua dependendo de relógio real, e a margem de cada um.** Não foi
+convertido porque a margem é larga e na direção segura:
+
+| teste | relógio | margem |
+|---|---|---|
+| `DisjuntorTest` | espera 60 ms, `sleep` 80 ms | 20 ms, e dormir **mais** mantém o meio-aberto |
+| `perfilLentoFalhaAberta` | prazo 8 ms, stub dorme 200 ms | 25× |
+| `perfilProntoSobreviveAoPrazoJaConsumido` | índice dorme 120 ms, perfil responde em ~0 ms | 120 ms para uma tarefa trivial terminar |
+
+**E a caça virou script.** `scripts/cacar-flaky.ps1` roda a suíte N vezes sob
+contenção de todos os núcleos, com `-Ordem` para embaralhar a ordem das classes e
+pegar dependência de estado entre testes. Rodar dez vezes numa máquina ociosa não
+acha quase nada: o que derruba teste sensível a tempo é o agendador, e isso
+acontece em CI, não na máquina de quem escreveu o teste.
+
+Estado atual: 22 rodadas verdes sob contenção, 8 delas com ordem aleatória. Isso
+**não prova determinismo** — prova que nenhuma instabilidade apareceu nesta
+amostra, e o script existe para a amostra poder crescer.
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas

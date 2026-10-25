@@ -9,6 +9,7 @@ import dev.sugestao.busca.dominio.agregado.PesosDeFadiga;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,8 +47,38 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
     private final AtomicInteger retidos = new AtomicInteger();
     private final int teto;
 
+    /**
+     * De onde sai o "agora" desta classe.
+     *
+     * <p><strong>Injetado, e isso não é purismo de testabilidade — é o conserto
+     * de uma família de testes instáveis.</strong> Com {@code Instant.now()}
+     * chamado aqui dentro, a idade de um evento criado no teste é de
+     * microssegundos mas não é zero, e o decaimento a desconta: três cliques
+     * "de agora" dão 5,999999993 pontos em vez de 6,0, e a afinidade sai
+     * 0,9999999996 em vez de 1,0.
+     *
+     * <p>Três asserções deste projeto afirmavam igualdade exata nessa borda.
+     * Passavam numa máquina ociosa e falhavam sob carga, porque o que decide é se
+     * o relógio virou o microssegundo entre criar o evento e agregar. Uma delas
+     * só apareceu rodando a suíte doze vezes com todos os núcleos ocupados.
+     *
+     * <p>A alternativa seria afrouxar a tolerância das asserções, e ela tem um
+     * custo escondido: tolerância de 1e-6 também aceita um erro de verdade de
+     * 1e-6. Com o relógio fixo, {@code cadenciaNaoMudaOResultado} volta a poder
+     * afirmar igualdade <em>exata</em> — que é o que ele quer dizer de fato:
+     * rodar a agregação uma vez ou cem no mesmo instante dá a mesma resposta.
+     * Com relógio real, essa afirmação era falsa de direito e o teste só podia
+     * verificar uma aproximação dela.
+     */
+    private final Clock relogio;
+
     public AgregadosEmMemoria(int teto) {
+        this(teto, Clock.systemUTC());
+    }
+
+    public AgregadosEmMemoria(int teto, Clock relogio) {
         this.teto = teto;
+        this.relogio = relogio == null ? Clock.systemUTC() : relogio;
     }
 
     @Override
@@ -62,7 +93,8 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
 
     @Override
     public List<TermoAgregado> termos(Duration janela) {
-        Instant corte = Instant.now().minus(janela);
+        Instant agora = relogio.instant();
+        Instant corte = agora.minus(janela);
         Map<String, Acumulador> porTermo = new HashMap<>();
 
         for (EventoDeBusca evento : eventos) {
@@ -103,7 +135,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         var resultado = new ArrayList<TermoAgregado>(porTermo.size());
         porTermo.forEach((chave, a) -> {
             if (!chave.isBlank()) {
-                resultado.add(a.fechar(chave));
+                resultado.add(a.fechar(chave, agora));
             }
         });
         return resultado;
@@ -125,7 +157,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
             Duration janelaDoHistorico, int tamanhoDoHistorico,
             PesosDeAfinidade pesos, PesosDeFadiga fadiga) {
 
-        Instant agora = Instant.now();
+        Instant agora = relogio.instant();
         Instant corteDoHistorico = agora.minus(janelaDoHistorico);
         Instant corteDaAfinidade = pesos.corte(agora);
         Instant corteCurto = pesos.corteCurto(agora);
@@ -503,7 +535,17 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
          * acento e maiúscula preservados, a chave de dedup do BFF deixaria de
          * bater com o que está no índice.
          */
-        TermoAgregado fechar(String chave) {
+        /**
+         * O {@code agora} vem de fora, do relógio injetado na classe.
+         *
+         * <p>Ele só é usado quando nenhuma busca tocou este acumulador — termo
+         * que apareceu em impressão ou clique mas nunca foi digitado. Ainda
+         * assim vem de fora, e não de {@code Instant.now()}: dois relógios
+         * dentro da mesma rodada de agregação poderiam discordar, e o
+         * {@code visto_em_dt} é o campo que alimenta o {@code recip(ms(...))} do
+         * boost de recência no índice.
+         */
+        TermoAgregado fechar(String chave, Instant agora) {
             return new TermoAgregado(
                     chave,
                     segmentos,
@@ -512,7 +554,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
                     exibicoes,
                     cliques,
                     adesoes,
-                    vistoEm == Instant.EPOCH ? Instant.now() : vistoEm);
+                    vistoEm == Instant.EPOCH ? agora : vistoEm);
         }
     }
 }

@@ -16,7 +16,9 @@ import dev.sugestao.busca.dominio.evento.TipoDeEvento;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,7 +34,18 @@ class CaminhoDeEscritaTest {
     private static final int PISO = 30;
 
     private final FilaEmMemoria fila = new FilaEmMemoria(10_000);
-    private final AgregadosEmMemoria agregados = new AgregadosEmMemoria(100_000);
+    /**
+     * RELOGIO FIXO nos dois lados: no agregador e nos eventos.
+     *
+     * Mesma correcao de AgregadosEmMemoriaTest. Com relogio real, um evento
+     * criado em Instant.now() e agregado microssegundos depois tem idade > 0 e o
+     * decaimento desconta: afinidadeVemDeCliqueEAdesao afirmava isEqualTo(1.0)
+     * sobre 0,9999999996 e passava por sorte. Falhou sob contencao de CPU.
+     */
+    private static final Instant AGORA = Instant.parse("2026-06-15T12:00:00Z");
+
+    private final AgregadosEmMemoria agregados =
+            new AgregadosEmMemoria(100_000, Clock.fixed(AGORA, ZoneOffset.UTC));
     private final PublicadorFalso publicador = new PublicadorFalso();
     private final EscritorFalso perfis = new EscritorFalso();
 
@@ -255,7 +268,7 @@ class CaminhoDeEscritaTest {
     private static EventoDeBusca comJornada(
             TipoDeEvento tipo, String cliente, String termo, String jornada) {
         return new EventoDeBusca(tipo, cliente, Segmento.PF, termo, List.of(),
-                -1, "", jornada, false, Instant.now());
+                -1, "", jornada, false, AGORA);
     }
 
     private static List<EventoDeBusca> eventosDeClientesDistintos(String termo, int quantos) {
@@ -273,7 +286,7 @@ class CaminhoDeEscritaTest {
     private static EventoDeBusca evento(
             TipoDeEvento tipo, String cliente, String termo, List<String> exibidos) {
         return new EventoDeBusca(tipo, cliente, Segmento.PF, termo, exibidos,
-                -1, "", "", false, Instant.now());
+                -1, "", "", false, AGORA);
     }
 
     private static final class PublicadorFalso implements PublicadorDeVocabulario {
