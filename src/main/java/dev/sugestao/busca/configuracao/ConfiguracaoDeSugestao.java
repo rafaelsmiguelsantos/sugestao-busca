@@ -2,6 +2,7 @@ package dev.sugestao.busca.configuracao;
 
 import dev.sugestao.busca.adaptador.entrada.agendador.AgendadorDeAprendizado;
 import dev.sugestao.busca.adaptador.saida.agregado.AgregadosEmMemoria;
+import dev.sugestao.busca.adaptador.saida.agregado.EventosDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.fila.FilaEmMemoria;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisEmMemoria;
@@ -32,6 +33,7 @@ import dev.sugestao.busca.aplicacao.porta.saida.RegistroDeOfertas;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
 import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDePerfil;
 import dev.sugestao.busca.dominio.ClassificadorDeOrigem;
+import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
 import dev.sugestao.busca.dominio.Cotas;
 import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Peneira;
@@ -220,9 +222,22 @@ public class ConfiguracaoDeSugestao {
         return new FilaEmMemoria(props.aprendizado().tetoDaFila());
     }
 
+    /**
+     * Semeado com cliques e adesões falsos, para a demonstração ter afinidade
+     * sem ninguém precisar clicar à mão.
+     *
+     * <p>Antes, a afinidade da demonstração era escrita à mão no perfil. Deixou
+     * de funcionar quando ela passou a ter decaimento e a sobrescrever: a
+     * primeira rodada substituiria o número inventado por zero. Semeando evento,
+     * a afinidade passa a ser <em>calculada</em> pelo mesmo caminho que
+     * calcularia a de um cliente de verdade — e a demonstração prova o pipeline
+     * em vez de contorná-lo.
+     */
     @Bean
     public RepositorioDeAgregados repositorioDeAgregados(SugestaoProperties props) {
-        return new AgregadosEmMemoria(props.aprendizado().tetoDeEventos());
+        var agregados = new AgregadosEmMemoria(props.aprendizado().tetoDeEventos());
+        agregados.acumular(EventosDaDemonstracao.iniciais());
+        return agregados;
     }
 
     @Bean
@@ -240,12 +255,21 @@ public class ConfiguracaoDeSugestao {
     @Bean
     public ParametrosDeAprendizado parametrosDeAprendizado(SugestaoProperties props) {
         var a = props.aprendizado();
+
+        var afinidade = a.afinidade() == null
+                ? SugestaoProperties.Afinidade.padrao()
+                : a.afinidade();
+
         return new ParametrosDeAprendizado(
                 Duration.ofDays(a.janelaVocabularioDias()),
                 Duration.ofHours(a.janelaComportamentoHoras()),
                 a.tamanhoDoHistorico(),
                 a.loteDeConsumo(),
-                props.kAnonimatoMinimo());
+                props.kAnonimatoMinimo(),
+                new PesosDeAfinidade(
+                        Duration.ofDays(afinidade.janelaDias()),
+                        Duration.ofDays(afinidade.meiaVidaDias()),
+                        afinidade.pisoDeConfianca()));
     }
 
     @Bean

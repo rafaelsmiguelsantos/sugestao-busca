@@ -73,7 +73,9 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
         // depois. Se o índice estiver fora, os termos ficam no agregado e a
         // próxima rodada publica — o agendador é o mecanismo de nova tentativa.
         var comportamentos = agregados.comportamentos(
-                parametros.janelaDoComportamento(), parametros.tamanhoDoHistorico());
+                parametros.janelaDoComportamento(),
+                parametros.tamanhoDoHistorico(),
+                parametros.afinidade());
         perfis.atualizar(comportamentos);
 
         var termos = agregados.termos(parametros.janelaDoVocabulario());

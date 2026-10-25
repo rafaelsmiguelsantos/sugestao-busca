@@ -4,6 +4,7 @@ import dev.sugestao.busca.aplicacao.porta.saida.RepositorioDeAgregados;
 import dev.sugestao.busca.dominio.Jornada;
 import dev.sugestao.busca.dominio.Normalizacao;
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
+import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 
@@ -83,8 +84,26 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
             }
         }
 
+        // Termo vazio nunca vira vocabulário.
+        //
+        // Apareceu por um caminho e vale por dois. O caminho: os eventos
+        // semeados da demonstração são cliques com termo vazio — o que importa
+        // neles é a jornada — e criavam um agregado de chave "" que o relatório
+        // reportava como termo retido pelo piso. O valor: um cliente pode mandar
+        // evento cujo termo o saneamento reduz a nada, e sem este corte isso
+        // seria uma entrada de vocabulário que nenhuma busca alcança e que o
+        // portão de publicação nem examina, porque ele ignora chave com menos de
+        // dois caracteres.
+        //
+        // Aqui e não na ingestão porque a ingestão aceita de propósito o evento
+        // cujo termo não interessa: SUGESTAO_CLICADA vale pela jornada, e
+        // recusá-lo por não ter termo jogaria fora o sinal de afinidade junto.
         var resultado = new ArrayList<TermoAgregado>(porTermo.size());
-        porTermo.forEach((chave, a) -> resultado.add(a.fechar(chave)));
+        porTermo.forEach((chave, a) -> {
+            if (!chave.isBlank()) {
+                resultado.add(a.fechar(chave));
+            }
+        });
         return resultado;
     }
 
@@ -100,39 +119,62 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
     private static final double PESO_DA_ADESAO = 5.0;
 
     @Override
-    public List<ComportamentoDoCliente> comportamentos(Duration janela, int tamanhoDoHistorico) {
-        Instant corte = Instant.now().minus(janela);
+    public List<ComportamentoDoCliente> comportamentos(
+            Duration janelaDoHistorico, int tamanhoDoHistorico, PesosDeAfinidade pesos) {
+
+        Instant agora = Instant.now();
+        Instant corteDoHistorico = agora.minus(janelaDoHistorico);
+        Instant corteDaAfinidade = pesos.corte(agora);
+
+        // As duas janelas são diferentes e a varredura é uma só: a mais larga
+        // das duas é a da afinidade, então a iteração para nela e o histórico
+        // aplica o próprio corte dentro do laço.
+        Instant corteMaisLargo = corteDoHistorico.isBefore(corteDaAfinidade)
+                ? corteDoHistorico
+                : corteDaAfinidade;
 
         // LinkedHashSet para deduplicar mantendo a ordem, e a iteração é do
         // mais recente para o mais antigo: quem repete uma busca mantém a
         // posição da vez mais recente, não da primeira.
         Map<String, LinkedHashSet<String>> historicos = new HashMap<>();
-        Map<String, Map<String, Double>> afinidades = new HashMap<>();
+
+        // Pontos BRUTOS, já descontada a idade de cada evento. Viram afinidade
+        // entre 0 e 1 no fim, dividindo pelo piso de confiança — não pelo máximo
+        // da própria pessoa, que era o que fazia um clique valer 1,0.
+        Map<String, Map<String, Double>> pontos = new HashMap<>();
 
         var reverso = eventos.descendingIterator();
         while (reverso.hasNext()) {
             EventoDeBusca evento = reverso.next();
-            if (evento.ocorridoEm().isBefore(corte)) {
-                continue;
+
+            // A fila é cronológica e a varredura é do fim para o começo: o
+            // primeiro evento velho encontrado encerra a varredura, porque todos
+            // os anteriores são mais velhos ainda. `continue` percorreria a fila
+            // inteira a cada rodada, e ela guarda dezenas de milhares.
+            if (evento.ocorridoEm().isBefore(corteMaisLargo)) {
+                break;
             }
 
             switch (evento.tipo()) {
-                case BUSCA_DIGITADA -> historicos
-                        .computeIfAbsent(evento.clienteId(), c -> new LinkedHashSet<>())
-                        .add(evento.termo());
+                case BUSCA_DIGITADA -> {
+                    if (!evento.ocorridoEm().isBefore(corteDoHistorico)) {
+                        historicos.computeIfAbsent(evento.clienteId(), c -> new LinkedHashSet<>())
+                                .add(evento.termo());
+                    }
+                }
 
-                case SUGESTAO_CLICADA -> somarAfinidade(
-                        afinidades, evento.clienteId(), evento.jornada(), PESO_DO_CLIQUE);
+                case SUGESTAO_CLICADA -> somarPontos(
+                        pontos, evento, PESO_DO_CLIQUE, pesos, agora, corteDaAfinidade);
 
-                case ADESAO -> somarAfinidade(
-                        afinidades, evento.clienteId(), evento.jornada(), PESO_DA_ADESAO);
+                case ADESAO -> somarPontos(
+                        pontos, evento, PESO_DA_ADESAO, pesos, agora, corteDaAfinidade);
 
                 default -> { }
             }
         }
 
         var clientes = new LinkedHashSet<String>(historicos.keySet());
-        clientes.addAll(afinidades.keySet());
+        clientes.addAll(pontos.keySet());
 
         var resultado = new ArrayList<ComportamentoDoCliente>(clientes.size());
         for (String cliente : clientes) {
@@ -145,13 +187,25 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
                     // modela — por isso esta lista sai vazia e o escritor de
                     // perfil preserva os gatilhos que já existiam.
                     Set.of(),
-                    normalizada(afinidades.get(cliente))));
+                    comoAfinidade(pontos.get(cliente), pesos)));
         }
         return resultado;
     }
 
-    private static void somarAfinidade(
-            Map<String, Map<String, Double>> afinidades, String cliente, String jornada, double peso) {
+    /**
+     * Pontos brutos por jornada, cada evento valendo menos conforme envelhece.
+     */
+    private static void somarPontos(
+            Map<String, Map<String, Double>> pontos,
+            EventoDeBusca evento,
+            double pesoBase,
+            PesosDeAfinidade pesos,
+            Instant agora,
+            Instant corteDaAfinidade) {
+
+        if (evento.ocorridoEm().isBefore(corteDaAfinidade)) {
+            return;
+        }
 
         // Normaliza pela mesma função que normaliza a jornada no cadastro de
         // oferta. Sem isto, um app que manda "Crédito" cria um balde que nunca
@@ -159,7 +213,7 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
         // contada, guardada, e não produz impulso nenhum. Falha silenciosa, do
         // tipo que se descobre meses depois perguntando por que o ranking por
         // comportamento não mexe em nada.
-        String chave = Normalizacao.aplicar(jornada);
+        String chave = Normalizacao.aplicar(evento.jornada());
 
         // E o sentinela de "sem jornada" não acumula.
         //
@@ -174,29 +228,47 @@ public class AgregadosEmMemoria implements RepositorioDeAgregados {
             return;
         }
 
-        afinidades.computeIfAbsent(cliente, c -> new HashMap<>())
+        double peso = pesos.pesoComIdade(pesoBase, evento.ocorridoEm(), agora);
+
+        pontos.computeIfAbsent(evento.clienteId(), c -> new HashMap<>())
                 .merge(chave, peso, Double::sum);
     }
 
     /**
-     * Divide pela jornada mais forte da própria pessoa, não por um máximo
-     * global. Afinidade é relativa a ela mesma: quem só mexeu em crédito tem
-     * afinidade 1 com crédito, ainda que tenha clicado três vezes e outro
-     * cliente trezentas. Normalizar contra a população transformaria esta
-     * medida num segundo índice de popularidade, que já existe no {@code ctr}.
+     * Pontos viram afinidade dividindo pelo <strong>piso de confiança</strong>,
+     * que é constante — não pela jornada mais forte da própria pessoa.
+     *
+     * <p>A divisão pelo próprio máximo era a decisão anterior, e a intenção
+     * estava certa: não transformar esta medida num segundo índice de
+     * popularidade, que já existe no {@code ctr}. O efeito era outro. Com
+     * {@code {credito: 2.0}}, o máximo da pessoa é 2,0 e o resultado é 1,0 —
+     * <em>um clique dava afinidade máxima</em>, e um clique acidental punha a
+     * pessoa no teto de promoção da jornada.
+     *
+     * <p>Com divisor constante, a propriedade que importava fica: três cliques e
+     * trezentos cliques chegam ao mesmo 1,0, porque o valor é limitado em 1, e
+     * nenhum dos dois é comparado com a população. O que muda é que pouca
+     * evidência passa a valer pouco — que é o que pouca evidência é.
+     *
+     * <p>Jornada abaixo de um milésimo é descartada. São os eventos tão velhos
+     * que o decaimento já os tornou irrelevantes, e mantê-los no mapa só gasta
+     * espaço no perfil e tempo na comparação.
      */
-    private static Map<String, Double> normalizada(Map<String, Double> brutos) {
-        if (brutos == null || brutos.isEmpty()) {
-            return Map.of();
-        }
-        double maior = brutos.values().stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        if (maior <= 0) {
+    private static Map<String, Double> comoAfinidade(
+            Map<String, Double> pontos, PesosDeAfinidade pesos) {
+
+        if (pontos == null || pontos.isEmpty()) {
             return Map.of();
         }
 
-        var escalada = new HashMap<String, Double>(brutos.size());
-        brutos.forEach((jornada, peso) -> escalada.put(jornada, peso / maior));
-        return Map.copyOf(escalada);
+        var afinidades = new HashMap<String, Double>(pontos.size());
+        pontos.forEach((jornada, total) -> {
+            double afinidade = pesos.afinidadeDe(total);
+            if (afinidade >= 0.001) {
+                afinidades.put(jornada, afinidade);
+            }
+        });
+        return Map.copyOf(afinidades);
     }
 
     @Override

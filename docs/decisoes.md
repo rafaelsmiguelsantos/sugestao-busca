@@ -501,6 +501,108 @@ de escrita, e `GET /v1/nao-existe` com token válido dando 403 em vez de 404 —
 
 ---
 
+## 15. A afinidade: piso de confiança e meia-vida
+
+**Contexto.** Duas decisões anteriores pareciam boas isoladas e, juntas, faziam o
+sistema acreditar rápido demais e nunca esquecer.
+
+*A primeira:* a afinidade era normalizada pela jornada mais forte **da própria
+pessoa**. A intenção estava certa — não transformar a medida num segundo índice
+de popularidade, que já existe no `ctr`. O efeito era que **um clique dava
+afinidade 1,0**: com `{credito: 2.0}`, o máximo da pessoa é 2,0, e 2,0/2,0 = 1.
+Um clique acidental punha a pessoa no teto de promoção da jornada.
+
+*A segunda:* a afinidade era substituída a cada rodada. Isso apagava tudo quando
+a janela não tinha cliques (decisão 13 corrigiu para preservar), e preservar fez
+nada esfriar nunca.
+
+**Decisão.** `PesosDeAfinidade`, no domínio, com três números:
+
+```
+peso_efetivo(evento) = peso_base × 0.5^(idade / meia_vida)
+pontos(j)            = Σ peso_efetivo dos eventos da jornada j na janela
+afinidade(j)         = min(1, pontos(j) / piso_de_confianca)
+```
+
+Com `piso = 6`, `meia_vida = 7 dias`, `janela = 90 dias`, e clique valendo 2 e
+adesão 5:
+
+| evidência | afinidade | fator no ranking |
+|---|---|---|
+| 1 clique de hoje | 0,33 | 1,17x |
+| 1 adesão de hoje | 0,83 | 1,42x |
+| 3 cliques de hoje | 1,00 | 1,50x |
+| 3 cliques, 7 dias | 0,50 | 1,25x |
+| 3 cliques, 30 dias | 0,05 | 1,03x |
+
+**O divisor constante substitui o máximo da pessoa, e a propriedade que
+importava fica.** Três cliques e trezentos cliques chegam ao mesmo 1,0, porque o
+valor é limitado em 1 — e nenhum dos dois é comparado com a população. O que
+muda é que pouca evidência passa a valer pouco, que é o que pouca evidência é.
+
+### Por idade do evento, nunca por rodada
+
+Decaimento por rodada é o que parece natural e é uma armadilha, e foi a primeira
+coisa que eu ia implementar. Três problemas:
+
+1. O agendador roda a cada 15 s. Um fator por rodada esvaziaria a afinidade em
+   minutos.
+2. Trocar o intervalo do agendador mudaria a velocidade do esquecimento — uma
+   decisão de produto virando efeito colateral de configuração de
+   infraestrutura.
+3. `comportamentos()` recalcula a janela inteira a cada chamada, então acumular
+   entre rodadas contaria o mesmo clique centenas de vezes.
+
+Por idade, rodar a agregação uma vez ou cem vezes no mesmo minuto dá a mesma
+resposta. Há teste para isso (`cadenciaNaoMudaOResultado`).
+
+### Janela e meia-vida fazem trabalhos diferentes
+
+A **meia-vida** decide a velocidade do esquecimento. A **janela** só decide
+quando parar de somar, e é generosa — 90 dias — porque interesse em crédito
+imobiliário não se demonstra todo dia, e cortar em 24 h chamaria de desinteresse
+o que é só intervalo entre acessos. A meia-vida já tornou irrelevante o que é
+velho; a janela só evita somá-lo.
+
+O construtor recusa janela menor que a meia-vida: isso cortaria o evento antes de
+ele ter decaído, e o esquecimento voltaria a ser o corte seco que esta decisão
+substitui.
+
+### Consequências que vieram de carona
+
+**A escrita de perfil voltou a sobrescrever a afinidade** — inclusive com vazio —
+e agora está certo, porque o vazio voltou a querer dizer algo: "nenhum clique em
+três meses". O histórico continua protegido contra vazio, e a assimetria é o
+ponto: ele é *acumulado* ("o que você digitou ultimamente"), ela é *medida* ("em
+que você demonstrou interesse").
+
+**A afinidade da demonstração deixou de ser afirmada.** Ela era
+`Map.of("credito", 1.0)` escrito no código — uma afirmação sobre o resultado,
+sem nada por trás, que a sobrescrita agora zeraria na primeira rodada. Virou
+`EventosDaDemonstracao`: cliques e adesões falsos, semeados no agregado, de onde
+a afinidade é **calculada** pelo mesmo caminho que calcularia a de um cliente de
+verdade. A demonstração passou a provar o pipeline em vez de contorná-lo.
+
+**O atraso inicial do agendador foi a zero.** Ele era igual ao intervalo, o que
+dava uma janela cega de 15 s depois da subida: nesse intervalo nenhum perfil
+tinha afinidade calculada. Numa demonstração parece defeito; em produção é o
+primeiro usuário do dia recebendo lista pior sem razão. Deixou de ser necessário
+porque a rodada agora atualiza perfil antes de tocar o índice (decisão 13).
+
+**Termo vazio não vira vocabulário.** Os eventos semeados são cliques sem termo —
+neles o que importa é a jornada — e criavam um agregado de chave `""`. O corte
+vale também para evento de cliente cujo termo o saneamento reduz a nada: seria
+uma entrada que nenhuma busca alcança e que o portão de publicação nem examina,
+porque ele ignora chave com menos de dois caracteres.
+
+**Verificado ao vivo**, 2 s depois da subida e sem gatilho manual:
+`pf-pix-recusado` tem `r=2,999243` em crédito contra `r=2,0` de `pf-novo`. E o
+`2,999243` em vez de `3,0` exato é o decaimento aparecendo: os cliques semeados
+têm minutos de idade, e `0,5^(minutos/7 dias)` tira aquele fiapo. O código
+anterior dava `3,0` redondo porque não decaía nada.
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas
@@ -509,15 +611,14 @@ são resolvidas. Nenhum destes é descuido — estão aqui para não virarem sur
 **~~Não há autorização em `POST /v1/ofertas`.~~** Resolvido na decisão 14: o
 token carrega a jornada e o caso de uso confere o corpo contra ela.
 
-**A afinidade não esfria sozinha.** A escrita de perfil deixou de sobrescrever
-com vazio — porque vazio significava "esta janela não viu nada", e um clique sem
-busca apagava o histórico inteiro da pessoa. O preço é que uma janela sem cliques
-também não zera a afinidade: interesse antigo continua inclinando a lista. O que
-segura é o teto de `PesosDeRanking.afinidadeMaxima`, que é multiplicador e só
-promove, mais a cota do `Misturador`. Esfriar de verdade pede **decaimento
-explícito** — multiplicar por um fator a cada rodada, em vez de substituir — e é
-a próxima coisa a fazer nessa parte. Trocar apagamento instantâneo por
-esfriamento lento é o lado certo de errar.
+**~~A afinidade não esfria sozinha.~~** Resolvido na decisão 15, junto com o
+problema irmão de um clique valer afinidade máxima.
+
+**A afinidade não distingue clique de arrepender.** Clicar e voltar em dois
+segundos conta igual a clicar e contratar — o `SUGESTAO_CLICADA` não tem duração
+nem desfecho. Um sinal de permanência (`tempo até voltar`) separaria interesse de
+engano, e é o tipo de evento que o app pode emitir sem custo. Hoje o que compensa
+isso em parte é a adesão valer 5 contra 2 do clique.
 
 **A revogação de token não existe.** Um JWT assinado vale até expirar, e os
 tokens deste POC valem 60 minutos. Não há lista de revogados nem introspecção, o

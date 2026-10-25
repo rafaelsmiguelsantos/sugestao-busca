@@ -1,6 +1,7 @@
 package dev.sugestao.busca.aplicacao.porta.saida;
 
 import dev.sugestao.busca.dominio.agregado.ComportamentoDoCliente;
+import dev.sugestao.busca.dominio.agregado.PesosDeAfinidade;
 import dev.sugestao.busca.dominio.agregado.TermoAgregado;
 import dev.sugestao.busca.dominio.evento.EventoDeBusca;
 
@@ -23,8 +24,18 @@ public interface RepositorioDeAgregados {
     /** Vocabulário somado sobre a janela, ainda sem passar pelo piso. */
     List<TermoAgregado> termos(Duration janela);
 
-    /** Comportamento por cliente na janela curta. */
-    List<ComportamentoDoCliente> comportamentos(Duration janela, int tamanhoDoHistorico);
+    /**
+     * Comportamento por cliente.
+     *
+     * <p>Duas janelas, porque histórico e afinidade medem coisas diferentes. O
+     * histórico é "o que você digitou ultimamente" e é curto — lista de
+     * conveniência. A afinidade é "em que você demonstrou interesse" e é longa
+     * com meia-vida curta: interesse em crédito imobiliário não se demonstra
+     * todo dia, e cortar em 24 h chamaria de desinteresse o que é só intervalo
+     * entre acessos.
+     */
+    List<ComportamentoDoCliente> comportamentos(
+            Duration janelaDoHistorico, int tamanhoDoHistorico, PesosDeAfinidade pesos);
 
     int eventosRetidos();
 }

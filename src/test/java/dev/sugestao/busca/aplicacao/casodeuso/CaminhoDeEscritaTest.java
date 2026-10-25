@@ -211,11 +211,22 @@ class CaminhoDeEscritaTest {
         var c1 = perfis.recebidos.stream()
                 .filter(c -> c.clienteId().equals("c-1")).findFirst().orElseThrow();
 
-        // credito = clique(2) + adesão(5) = 7; investimento = clique(2).
-        // Normalizado pela jornada mais forte DELE, não por um máximo global.
+        // credito = clique(2) + adesão(5) = 7 pontos; investimento = clique(2).
+        //
+        // Divididos pelo PISO DE CONFIANÇA, que é 6 e é constante — não pela
+        // jornada mais forte dele, que era a versão anterior. Com o próprio
+        // máximo como divisor, o único clique em investimento daria 2/7, e um
+        // clique isolado numa jornada daria 1,0: o sistema acreditava no
+        // primeiro clique.
+        //
+        // Agora crédito passa do piso e é limitado em 1,0; investimento fica em
+        // 0,33, que no ranking é 1,17x. Ruído, que é o que um clique é.
         assertThat(c1.afinidadePorJornada()).containsOnlyKeys("credito", "investimento");
         assertThat(c1.afinidadePorJornada().get("credito")).isEqualTo(1.0);
-        assertThat(c1.afinidadePorJornada().get("investimento")).isEqualTo(2.0 / 7.0);
+        assertThat(c1.afinidadePorJornada().get("investimento"))
+                .isCloseTo(2.0 / 6.0, org.assertj.core.api.Assertions.within(0.001));
+
+        // 'ajuda' veio de uma BUSCA, e busca não gera afinidade.
         assertThat(c1.afinidadePorJornada()).doesNotContainKey("ajuda");
     }
 

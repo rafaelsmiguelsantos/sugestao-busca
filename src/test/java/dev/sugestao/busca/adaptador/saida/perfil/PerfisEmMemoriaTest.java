@@ -52,16 +52,32 @@ class PerfisEmMemoriaTest {
     }
 
     @Test
-    @DisplayName("afinidade vazia NÃO apaga a afinidade guardada")
-    void afinidadeVaziaNaoApaga() {
-        // O espelho: um cliente que buscou e não clicou em nada na janela
-        // chegava com o mapa vazio e perdia a afinidade inteira.
+    @DisplayName("afinidade vazia APAGA — e aqui a assimetria com o histórico é deliberada")
+    void afinidadeVaziaApaga() {
+        // Esta linha já foi as duas coisas erradas, e a terceira versão é a
+        // certa por um motivo que não estava disponível antes.
+        //
+        // Primeiro ela sobrescrevia com vazio e não havia decaimento: uma busca
+        // sem clique apagava a afinidade inteira, e vazio significava apenas
+        // "esta janela não viu clique". Depois passou a preservar, e nada
+        // esfriava nunca — interesse de um ano atrás continuava inclinando a
+        // lista.
+        //
+        // Agora a afinidade tem janela de 90 dias com meia-vida de 7, e o
+        // decaimento mora DENTRO do cálculo, por idade de evento. O que chega
+        // aqui já é a verdade atual, e mapa vazio significa "nenhum clique em
+        // três meses" — que é afinidade zero de verdade. Sobrescrever voltou a
+        // ser o certo porque o vazio voltou a querer dizer algo.
+        //
+        // O histórico continua protegido, e a assimetria é o ponto: ele é
+        // acumulado ("o que você digitou ultimamente"), ela é medida ("em que
+        // você demonstrou interesse").
         var perfis = new PerfisEmMemoria(Map.of(CLIENTE, comHistoricoEAfinidade()));
 
         perfis.atualizar(List.of(new ComportamentoDoCliente(
                 CLIENTE, List.of("consorcio"), Set.of(), Map.of())));
 
-        assertThat(perfis.porCliente(CLIENTE).afinidadeCom("credito")).isEqualTo(1.0);
+        assertThat(perfis.porCliente(CLIENTE).afinidadeCom("credito")).isZero();
         assertThat(perfis.porCliente(CLIENTE).historico()).containsExactly("consorcio");
     }
 

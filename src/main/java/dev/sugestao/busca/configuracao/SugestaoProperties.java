@@ -202,5 +202,39 @@ public record SugestaoProperties(
              */
             long publicacaoTimeoutMs,
 
-            boolean gatilhoManual) { }
+            boolean gatilhoManual,
+
+            /*
+             * Como clique e adesao viram afinidade. Ver PesosDeAfinidade: os
+             * tres numeros substituem duas decisoes que, juntas, faziam o
+             * sistema acreditar no primeiro clique e nunca esquecer.
+             */
+            Afinidade afinidade) { }
+
+    /**
+     * Janela, meia-vida e piso de confiança da afinidade.
+     *
+     * <p>A janela e a meia-vida fazem trabalhos diferentes, e confundi-los é o
+     * erro fácil. A <strong>meia-vida</strong> decide a velocidade do
+     * esquecimento. A <strong>janela</strong> só decide quando parar de somar, e
+     * é generosa porque interesse em crédito imobiliário não se demonstra todo
+     * dia.
+     *
+     * <p>O <strong>piso de confiança</strong> é quantos pontos valem afinidade
+     * máxima. Com clique valendo 2 e adesão 5, seis pontos são três cliques de
+     * hoje. Baixá-lo faz o sistema acreditar mais rápido; zerá-lo faz um clique
+     * valer o máximo, que era o defeito.
+     */
+    public record Afinidade(int janelaDias, int meiaVidaDias, double pisoDeConfianca) {
+
+        public Afinidade {
+            janelaDias = janelaDias <= 0 ? 90 : janelaDias;
+            meiaVidaDias = meiaVidaDias <= 0 ? 7 : meiaVidaDias;
+            pisoDeConfianca = pisoDeConfianca <= 0 ? 6.0 : pisoDeConfianca;
+        }
+
+        public static Afinidade padrao() {
+            return new Afinidade(90, 7, 6.0);
+        }
+    }
 }

@@ -638,7 +638,8 @@ src/main/java/dev/sugestao/busca/
 │   │                          OfertaInvalida, Violacao
 │   ├── evento/Saneador        o portão de PII, na ingestão
 │   └── agregado/              TermoAgregado, ComportamentoDoCliente,
-│                               ClassificadorDeJornada
+│                              ClassificadorDeJornada,
+│                              PesosDeAfinidade (meia-vida, piso de confianca)
 │
 ├── aplicacao/
 │   ├── porta/entrada/         SugerirSugestoes, RegistrarEventos,
@@ -661,7 +662,9 @@ src/main/java/dev/sugestao/busca/
 │   ├── saida/resiliencia/     Disjuntor (máquina de estados, sem framework),
 │   │                          CatalogoComDisjuntor (DECORADOR da porta)
 │   ├── saida/fila/            FilaEmMemoria — o lugar do MSK
-│   ├── saida/agregado/        AgregadosEmMemoria — o lugar do job de janela
+│   ├── saida/agregado/        AgregadosEmMemoria — o lugar do job de janela,
+│   │                          EventosDaDemonstracao (cliques falsos: a
+│   │                          afinidade da demo e calculada, nao afirmada)
 │   └── saida/perfil/          PerfisEmMemoria — o lugar do DynamoDB
 │
 └── configuracao/              o único lugar que sabe quem implementa cada porta,
@@ -734,6 +737,13 @@ O registro completo, com o que foi recusado e por quê, está em
   escopo é permissão; "a oferta tem de ser da jornada de quem cadastra" é regra
   de negócio.
 - **`anyRequest().denyAll()`.** Rota nova nasce fechada.
+- **A afinidade tem piso de confiança e meia-vida.** Um clique vale 0,33 e não
+  1,0; três cliques de um mês atrás valem 0,05. O decaimento é por **idade do
+  evento**, nunca por rodada — por rodada, trocar o intervalo do agendador
+  mudaria a velocidade do esquecimento. Decisão 15.
+- **A afinidade da demonstração é calculada, não afirmada.** Ela era um
+  `Map.of("credito", 1.0)` escrito no código; virou cliques semeados, de onde o
+  pipeline a deriva. A demonstração prova o caminho em vez de contorná-lo.
 - **Não existe starter do Spring para Solr** desde o Boot 2.4. O SolrJ 10 entra como
   dependência comum e o client vira um `@Bean` nosso.
 - **Duas análises de prefixo**, uma para a frase e outra por palavra, com pesos

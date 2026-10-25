@@ -27,9 +27,26 @@ public class AgendadorDeAprendizado {
         this.aprender = aprender;
     }
 
+    /**
+     * O atraso inicial é separado do intervalo, e por um motivo que custou uma
+     * depuração.
+     *
+     * <p>Os dois eram o mesmo valor, o que dava uma <strong>janela cega de 15
+     * segundos</strong> depois da subida: nesse intervalo, nenhum perfil tinha
+     * afinidade calculada, e quem subisse a aplicação e consultasse na hora via
+     * a lista sem nenhum sinal de comportamento. Numa demonstração isso parece
+     * defeito; em produção é o primeiro usuário do dia recebendo lista pior sem
+     * razão.
+     *
+     * <p>O atraso existia para não disparar uma rodada antes de as dependências
+     * estarem de pé. Deixou de ser necessário quando a rodada passou a atualizar
+     * perfil <em>antes</em> de tocar o índice: com o Solr fora, a parte de
+     * vocabulário falha e o agendador a retoma, e a parte de perfil — que não
+     * precisa de Solr — já terá acontecido. Por isso o padrão agora é zero.
+     */
     @Scheduled(
             fixedDelayString = "${sugestao.aprendizado.intervalo-ms}",
-            initialDelayString = "${sugestao.aprendizado.intervalo-ms}")
+            initialDelayString = "${sugestao.aprendizado.atraso-inicial-ms:0}")
     public void rodar() {
         try {
             var resultado = aprender.executar();

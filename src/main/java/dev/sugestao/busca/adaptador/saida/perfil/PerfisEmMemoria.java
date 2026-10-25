@@ -80,22 +80,25 @@ public class PerfisEmMemoria implements RepositorioDePerfil, EscritorDePerfil {
                 atual.elegibilidades(),
                 atual.situacaoDaConta(),
 
-                // Mesma regra para a afinidade, pelo mesmo motivo: um cliente
-                // que buscou e não clicou em 24 h chegava com o mapa vazio e
-                // perdia a afinidade inteira.
+                // A afinidade, ao contrário do histórico, SOBRESCREVE — inclusive
+                // com vazio. E a diferença entre os dois é a parte interessante.
                 //
-                // Isto tem um preço, e é consciente: com janela vazia a
-                // afinidade deixa de esfriar, e interesse antigo continua
-                // inclinando a lista. O que segura é o teto de
-                // PesosDeRanking.afinidadeMaxima, que é multiplicador e só
-                // promove, mais a cota do Misturador. Esfriar de verdade pede
-                // decaimento explícito — um fator por rodada em vez de
-                // substituição — e está nos limites declarados de
-                // docs/decisoes.md. Trocar apagamento instantâneo por
-                // esfriamento lento é o lado certo de errar.
-                novo.afinidadePorJornada().isEmpty()
-                        ? atual.afinidadePorJornada()
-                        : novo.afinidadePorJornada(),
+                // O histórico é acumulado: "o que você digitou ultimamente". Uma
+                // janela sem buscas não significa que a pessoa não tem buscas
+                // recentes, e por isso vazio não apaga.
+                //
+                // A afinidade é medida: "em que você demonstrou interesse". Ela
+                // tem janela de 90 dias e meia-vida de 7 — o decaimento mora
+                // DENTRO do cálculo, por idade de evento. Então o que chega aqui
+                // já é a verdade atual, e um mapa vazio significa "nenhum clique
+                // em três meses", que é afinidade zero de verdade.
+                //
+                // Esta linha já foi as duas coisas erradas. Primeiro
+                // sobrescrevia com vazio sem ter decaimento, e uma busca sem
+                // clique apagava a afinidade inteira. Depois preservava, e nada
+                // esfriava nunca. Com o decaimento no lugar certo, sobrescrever
+                // volta a ser o certo — porque agora o vazio quer dizer algo.
+                novo.afinidadePorJornada(),
                 true);
     }
 
