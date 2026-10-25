@@ -29,7 +29,15 @@ $ProgressPreference    = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
 $gerador = Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\gerar-token.ps1'
-$SEGREDO = 'SEGREDO-REMOVIDO-VER-SUGESTAO-SEGREDO'
+
+# O segredo vem do ambiente, a mesma variavel que a aplicacao le. Nao ha valor
+# padrao: um segredo embutido aqui voltaria a por no repositorio exatamente o que
+# foi tirado dele, e este script e o que mais depende de assinar token valido.
+$SEGREDO = $env:SUGESTAO_SEGREDO
+if (-not $SEGREDO) {
+    throw "Defina `$env:SUGESTAO_SEGREDO (o mesmo da aplicacao) antes de sondar."
+}
+
 $EMISSOR = 'https://sugestao-busca.dev'
 
 $script:achados = New-Object System.Collections.ArrayList

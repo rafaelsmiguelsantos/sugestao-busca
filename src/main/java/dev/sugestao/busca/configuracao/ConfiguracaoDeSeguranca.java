@@ -121,7 +121,29 @@ public class ConfiguracaoDeSeguranca {
      */
     @Bean
     public JwtDecoder jwtDecoder() {
-        byte[] bytes = seguranca.segredo().getBytes(StandardCharsets.UTF_8);
+        String segredo = seguranca.segredo();
+
+        // Placeholder que não foi resolvido chega aqui como texto literal, e sem
+        // este caso a mensagem seria "precisa de ao menos 32 bytes; tem 19" —
+        // tecnicamente certa e inútil. Dezenove é o comprimento de
+        // "${SUGESTAO_SEGREDO}".
+        //
+        // Esta é a primeira mensagem que alguém que clonou o repositório vê, e
+        // ela tem de dizer o que fazer em vez de contar bytes.
+        if (segredo.startsWith("${") && segredo.endsWith("}")) {
+            throw new IllegalStateException("""
+                    A variavel de ambiente %s nao esta definida.
+
+                    Defina antes de subir:
+
+                        $env:SUGESTAO_SEGREDO = 'qualquer-coisa-com-ao-menos-32-bytes-aqui'
+
+                    Nao ha valor padrao de proposito. Ver \
+                    src/main/resources/application-local.properties.exemplo.\
+                    """.formatted(segredo.substring(2, segredo.length() - 1)));
+        }
+
+        byte[] bytes = segredo.getBytes(StandardCharsets.UTF_8);
 
         if (bytes.length < 32) {
             throw new IllegalStateException(
@@ -129,7 +151,7 @@ public class ConfiguracaoDeSeguranca {
                             + "tem " + bytes.length);
         }
 
-        var chave = new SecretKeySpec(bytes, "HmacSHA256");
+        var chave = new SecretKeySpec(segredo.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         var decodificador = NimbusJwtDecoder.withSecretKey(chave)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();

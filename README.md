@@ -690,13 +690,32 @@ próprio token é um BFF que decide quem ele mesmo é.
 
 No POC não há provedor, então a assinatura é HMAC-SHA256 com segredo
 compartilhado e os tokens de desenvolvimento saem de um **script fora da
-aplicação** — para não existir caminho de emissão no serviço nem por acidente:
+aplicação** — para não existir caminho de emissão no serviço nem por acidente.
+
+**Defina o segredo antes, uma vez.** Ele vem de uma variável de ambiente, sem
+valor padrão: a aplicação e o gerador leem a mesma, e nenhuma das duas funciona
+sem ela.
 
 ```powershell
+$env:SUGESTAO_SEGREDO = 'qualquer-coisa-com-ao-menos-32-bytes-aqui'
+
 .\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado
 .\scripts\gerar-token.ps1 -Tipo jornada -Jornada credito
 .\scripts\gerar-token.ps1 -Tipo operacao
 ```
+
+O segredo já morou em texto dentro de `application-local.properties`, e o
+raciocínio era que ele assinava apenas tokens válidos contra aquele arquivo. O
+raciocínio valia enquanto o repositório era privado. **Num repositório público ele
+deixa de valer por um caminho específico:** quem subisse esta aplicação com
+`--spring.profiles.active=local` teria um serviço cujo segredo é conhecido por
+qualquer leitor do GitHub — e a proteção de "o padrão seguro mora no
+`application.properties`" se perderia justamente para quem usou o perfil de
+demonstração por engano.
+
+Sem a variável, a aplicação recusa subir com a mensagem que diz o que fazer, e não
+com uma contagem de bytes. Ver
+[`application-local.properties.exemplo`](src/main/resources/application-local.properties.exemplo).
 
 ### Dois tipos de chamador
 
@@ -755,12 +774,16 @@ desenho do serviço a quem perguntar.
 
 ### O que fica de fora, e por quê
 
-**O segredo padrão é vazio e a aplicação recusa subir sem ele.** É a escolha
+**Não há segredo nenhum neste repositório, em nenhum perfil.** É a escolha
 deliberadamente inconveniente: um segredo embutido funcionaria em qualquer lugar,
 inclusive em produção, e assinaria tokens que qualquer pessoa com acesso a este
 repositório sabe forjar. Falhar na subida é ruidoso, acontece uma vez, e acontece
-para quem está configurando — não para quem está sendo atacado. O perfil `local`
-traz um segredo visivelmente falso.
+para quem está configurando — não para quem está sendo atacado.
+
+O perfil `default` sempre teve essa propriedade; o perfil `local` passou a ter ao
+abrir o repositório, porque até então ele trazia o valor em texto. A collection do
+Postman e o `sondar.ps1` seguiram o mesmo caminho: os dois leem a variável, e a
+collection traz `COLE-AQUI-O-MESMO-DE-SUGESTAO-SEGREDO` no lugar do valor.
 
 **`sugestao.seguranca.habilitada=false`** abre todas as rotas e faz a identidade
 voltar a vir de cabeçalho. Existe para demonstrar sem emitir token, **grita no

@@ -20,10 +20,17 @@
 
     O SEGREDO
 
-    Vem de application-local.properties, em texto, no repositorio. Ele assina
-    apenas tokens que valem contra aquele arquivo. Qualquer pessoa que leia o
-    repositorio sabe forja-lo, e e por isso que ele NAO e o padrao do
-    application.properties — la o segredo e vazio e a aplicacao recusa subir.
+    Vem da variavel de ambiente SUGESTAO_SEGREDO, a mesma que a aplicacao le.
+    Nao ha valor padrao, nem aqui nem la: sem configurar, nem o servico sobe nem
+    este script assina.
+
+        $env:SUGESTAO_SEGREDO = 'qualquer-coisa-com-ao-menos-32-bytes-aqui'
+
+    Ele ja morou em texto dentro de application-local.properties, com o
+    raciocinio de que assinava apenas tokens validos contra aquele arquivo. O
+    raciocinio valia enquanto o repositorio era privado; num repositorio publico,
+    quem subisse a aplicacao com o perfil 'local' teria um servico com segredo
+    conhecido por qualquer leitor do GitHub.
 
     Nota de codificacao: ASCII puro, como os outros scripts. O PowerShell 5.1 le
     .ps1 sem BOM como ANSI.
@@ -58,15 +65,37 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 # O segredo
 # ---------------------------------------------------------------------------
+# Le a MESMA variavel de ambiente que a aplicacao le.
+#
+# Antes este script extraia o segredo de application-local.properties com uma
+# expressao regular. Funcionava e tinha um defeito que so apareceu ao abrir o
+# repositorio: enquanto o segredo morava no arquivo versionado, qualquer leitor
+# do GitHub podia assinar token valido para qualquer instancia subida com o
+# perfil 'local'.
+#
+# Com o segredo no ambiente, o script e a aplicacao leem da mesma fonte e nenhuma
+# das duas tem valor padrao. A consequencia e deliberada: sem configurar, nada
+# funciona - nem o servico, nem o gerador.
 if (-not $Segredo) {
-    $raiz = Split-Path -Parent $PSScriptRoot
-    $arquivo = Join-Path $raiz 'src\main\resources\application-local.properties'
-    if (-not (Test-Path $arquivo)) { throw "Nao achei $arquivo. Passe -Segredo." }
+    $Segredo = $env:SUGESTAO_SEGREDO
+}
 
-    $linha = Select-String -Path $arquivo -Pattern '^\s*sugestao\.seguranca\.segredo\s*=\s*(.+)$' |
-             Select-Object -First 1
-    if (-not $linha) { throw "sugestao.seguranca.segredo nao esta em $arquivo. Passe -Segredo." }
-    $Segredo = $linha.Matches[0].Groups[1].Value.Trim()
+if (-not $Segredo) {
+    throw @"
+Nenhum segredo configurado.
+
+Defina a variavel de ambiente que a aplicacao tambem le:
+
+    `$env:SUGESTAO_SEGREDO = 'qualquer-coisa-com-ao-menos-32-bytes-aqui'
+
+Ou passe de forma explicita:
+
+    .\scripts\gerar-token.ps1 -Segredo 'ao-menos-32-bytes-....'
+
+Nao ha valor padrao de proposito. Um segredo embutido funcionaria em qualquer
+lugar, inclusive em producao, e assinaria tokens que qualquer pessoa com acesso
+a este repositorio saberia forjar.
+"@
 }
 
 if ([Text.Encoding]::UTF8.GetByteCount($Segredo) -lt 32) {

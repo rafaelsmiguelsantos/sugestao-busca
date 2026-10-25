@@ -139,7 +139,7 @@
   ],
   "variable": [
     { "key": "host", "value": "http://localhost:8080" },
-    { "key": "segredo", "value": "SEGREDO-REMOVIDO-VER-SUGESTAO-SEGREDO" },
+    { "key": "segredo", "value": "COLE-AQUI-O-MESMO-DE-SUGESTAO-SEGREDO" },
     { "key": "emissor", "value": "https://sugestao-busca.dev" },
     { "key": "ofertaId", "value": "OFR-PREVIDENCIA-VGBL-NEWMAN" },
     { "key": "termo", "value": "previdência privada VGBL" },

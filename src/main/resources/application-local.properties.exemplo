@@ -1,0 +1,51 @@
+# ---------------------------------------------------------------------------
+# Este arquivo e documentacao, nao configuracao.
+#
+# O perfil 'local' real vive em application-local.properties, que ESTA
+# versionado e nao contem segredo nenhum. Este .exemplo existe para registrar o
+# que precisa estar no ambiente antes de rodar.
+# ---------------------------------------------------------------------------
+#
+# UMA VARIAVEL, SEM VALOR PADRAO
+#
+# A aplicacao le ${SUGESTAO_SEGREDO} sem fallback, entao ela RECUSA SUBIR se a
+# variavel nao existir. O mesmo vale para scripts\gerar-token.ps1, que le a mesma
+# variavel - sem ela, nem o servico sobe nem o gerador assina.
+#
+# Isso e deliberadamente inconveniente. Um segredo embutido no repositorio
+# funcionaria em qualquer lugar, inclusive em producao, e assinaria tokens que
+# qualquer leitor deste repositorio saberia forjar. Falhar na subida e ruidoso,
+# acontece uma vez, e acontece para quem esta configurando - nao para quem esta
+# sendo atacado.
+#
+#
+# PowerShell, por terminal:
+#
+#     $env:SUGESTAO_SEGREDO = 'troque-isto-por-ao-menos-32-bytes-proprios'
+#
+# PowerShell, persistente no usuario:
+#
+#     [Environment]::SetEnvironmentVariable(
+#         'SUGESTAO_SEGREDO', 'troque-isto-por-ao-menos-32-bytes-proprios', 'User')
+#
+# bash / zsh:
+#
+#     export SUGESTAO_SEGREDO='troque-isto-por-ao-menos-32-bytes-proprios'
+#
+#
+# QUANTOS BYTES
+#
+# HS256 exige 256 bits, ou seja 32 bytes. Segredo curto faz a biblioteca recusar
+# na inicializacao com a contagem exata no erro. Para gerar um de verdade:
+#
+#     [Convert]::ToBase64String((1..48 | ForEach-Object {
+#         Get-Random -Maximum 256 }) -as [byte[]])
+#
+#
+# EM PRODUCAO NADA DISSO SE APLICA
+#
+# Lá o segredo compartilhado nao existe: o servico e servidor de recurso e valida
+# token assinado pelo provedor de identidade. Trocar HMAC por RSA com JWKS remoto
+# e trocar um metodo em ConfiguracaoDeSeguranca.jwtDecoder() por
+# NimbusJwtDecoder.withJwkSetUri(...), e nada mais do projeto muda - nem o
+# resolvedor de cliente, nem as regras de rota, nem o caso de uso.
