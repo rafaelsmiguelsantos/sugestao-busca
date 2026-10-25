@@ -47,7 +47,59 @@ public record SugestaoProperties(
          * O que um cliente de navegador precisa para chamar este servico. Vem
          * vazio, e vazio significa nenhuma origem autorizada — nao todas.
          */
-        Cors cors) {
+        Cors cors,
+
+        /*
+         * O disjuntor da porta de leitura. Protege a dependencia e o processo,
+         * nao a requisicao — o prazo e que protege a requisicao.
+         */
+        Disjuntor disjuntor) {
+
+    /**
+     * Quando parar de bater num índice que já respondeu que não está lá.
+     *
+     * <p>Os números são conservadores de propósito. Um disjuntor que abre fácil
+     * troca indisponibilidade real por indisponibilidade inventada, e a segunda
+     * é pior: ela acontece quando a dependência estava boa.
+     */
+    public record Disjuntor(
+            boolean habilitado,
+
+            /* Tamanho da janela de amostras. */
+            int janela,
+
+            /*
+             * Minimo de chamadas antes de decidir. Impede que uma falha isolada
+             * num servico recem-subido abra o disjuntor com amostra de tamanho
+             * um — que e exatamente o cenario de um Solr frio.
+             */
+            int minimoDeChamadas,
+
+            /* Falhas na janela que abrem o disjuntor. */
+            int limiteDeFalhas,
+
+            /* Quanto tempo fica aberto antes de liberar sondas. */
+            long esperaMs,
+
+            /*
+             * Quantas chamadas de prova passam no meio-aberto. Poucas: o Solr
+             * volta frio, e devolver de uma vez toda a carga que estava sendo
+             * recusada e a forma mais comum de derruba-lo outra vez.
+             */
+            int sondas) {
+
+        public Disjuntor {
+            janela = janela <= 0 ? 20 : janela;
+            minimoDeChamadas = minimoDeChamadas <= 0 ? 10 : minimoDeChamadas;
+            limiteDeFalhas = limiteDeFalhas <= 0 ? 10 : limiteDeFalhas;
+            esperaMs = esperaMs <= 0 ? 5000 : esperaMs;
+            sondas = sondas <= 0 ? 2 : sondas;
+        }
+
+        public static Disjuntor padrao() {
+            return new Disjuntor(true, 20, 10, 10, 5000, 2);
+        }
+    }
 
     /**
      * Origens autorizadas e por quanto tempo o navegador guarda o preflight.

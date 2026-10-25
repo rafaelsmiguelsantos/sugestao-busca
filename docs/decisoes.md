@@ -323,9 +323,85 @@ depois sem quebrar o que está gravado.
 
 ---
 
-## 13. Limites conhecidos, declarados
+## 13. O disjuntor entra como decorador da porta
 
-Nenhum destes é descuido. Estão aqui para não virarem surpresa.
+**Contexto.** O caminho de leitura já tinha prazo por dependência e caminho
+alternativo declarado. Faltava o terceiro mecanismo, e a diferença entre os três
+é a parte que se confunde: o prazo protege a *requisição*, o caminho alternativo
+protege a *resposta*, e o disjuntor protege a *dependência e o processo*.
+
+Com o Solr fora e só o prazo, cada tecla ainda abre uma conexão TCP e espera o
+prazo vencer — dezenas de tentativas por segundo contra um host morto, cada uma
+segurando descritor e thread. O prazo faz a falha ser rápida; o disjuntor faz a
+falha ser barata. E o meio-aberto existe para o outro lado do problema: quando a
+dependência volta, ela volta fria, e devolver de uma vez toda a carga que estava
+sendo recusada é a forma mais comum de derrubá-la outra vez.
+
+**Decisão.** `Disjuntor` (máquina de estados, sem framework, testável sem subir
+nada) mais `CatalogoComDisjuntor`, que implementa a mesma porta que decora. Quem
+empilha os dois é `ConfiguracaoDeSugestao`.
+
+**O que isto custou ao resto do projeto: nada.** Dois arquivos novos e quatro
+linhas na configuração. O domínio não sabe que existe disjuntor, o caso de uso
+não sabe, e o `CatalogoSolr` não sabe. Quando o disjuntor abre, a aplicação vê
+uma exceção da porta — igual à que já via quando o Solr respondia com erro — e a
+converte em `Colheita.FALHOU` e lista degradada, por um caminho testado desde
+antes deste arquivo existir. É o melhor argumento que este repositório tem a
+favor de portas e adaptadores: resiliência contra dependência que cai é
+exatamente o requisito que costuma vazar para todo lado.
+
+**As três alternativas, e o que cada uma acopla.**
+
+*No caso de uso:* uma classe da camada de aplicação passaria a conhecer um modo
+de falha de rede, e teria de ser alterada no dia em que a dependência virasse
+outra coisa.
+
+*Dentro do `CatalogoSolr`:* funcionaria, e todo adaptador que precisasse de
+disjuntor reimplementaria o seu. Pior, ligar e desligar exigiria mexer no código
+que fala com o Solr — o código que menos se quer mexer.
+
+*Com `@Aspect` ou proxy:* resolveria sem escrever classe nenhuma e deixaria o
+comportamento invisível. Ninguém lendo o adaptador descobriria que existe um
+disjuntor, e ninguém lendo a configuração descobriria a ordem das coisas. Um
+decorador explícito custa um arquivo e é legível de ponta a ponta.
+
+**Por fora do adaptador, não por dentro.** Por dentro, o disjuntor contaria
+falhas que o adaptador já pagou em rede. Por fora, ele recusa antes de abrir
+conexão.
+
+**Janela, e não falhas consecutivas.** Consecutivas é mais simples e não abre no
+caso que mais importa: uma dependência que responde metade das vezes nunca
+acumula a sequência, e metade das pessoas fica sem lista. O `minimoDeChamadas`
+impede o oposto — abrir com amostra de tamanho um, que é o cenário do Solr
+recém-subido estourando o prazo de 18 ms legitimamente.
+
+**Desligar é não empilhar.** `sugestao.disjuntor.habilitado=false` faz a
+configuração devolver o adaptador cru. Um disjuntor no-op passaria a existir no
+caminho de execução para não fazer nada, e "não fazer nada" é o tipo de coisa
+que, um dia, faz algo.
+
+**Só na porta de leitura.** O cadastro de oferta é de volume baixo e tem uma
+jornada esperando resposta: recusar sem tentar faria um cadastro falhar por causa
+de falhas de *outras* chamadas. A publicação roda no agendador, que já é o
+mecanismo de nova tentativa.
+
+**Um limite declarado:** o rastro não distingue "índice fora" de "disjuntor
+aberto" — as duas aparecem como falha da dependência. Distinguir exigiria um
+motivo novo em `Colheita`, o que significaria mudar a camada de aplicação para
+acomodar um detalhe do adaptador, contradizendo o que esta decisão defende. Quem
+distingue é o log do disjuntor, que registra cada transição de estado.
+
+**Medido com o Solr derrubado:** `msTotal` de 10 ms (tentando e falhando) para
+0–1 ms (nem tentando) depois de abrir, e o ciclo
+`ABERTO → MEIO_ABERTO → ABERTO → MEIO_ABERTO → FECHADO` no log, com a busca
+devolvendo 200 o tempo inteiro e se recuperando sem reiniciar o app.
+
+---
+
+## Limites conhecidos, declarados
+
+Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas
+são resolvidas. Nenhum destes é descuido — estão aqui para não virarem surpresa.
 
 **Não há autorização em `POST /v1/ofertas`.** Qualquer chamador pode cadastrar
 oferta em nome de qualquer jornada. Num sistema de verdade o token carrega a

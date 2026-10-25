@@ -6,6 +6,56 @@ Implementa o desenho de solução *Sugestão de busca no app*.
 Este repositório é o ambiente de desenvolvimento local do POC. Nada aqui usa dado
 real: o vocabulário é sintético e os perfis são falsos, em memória.
 
+A pergunta que o serviço responde não é "quais palavras completam o que a pessoa
+digitou". É **qual oferta apresentar a esta pessoa agora** — com o estado da
+conta, a faixa de relacionamento e o comportamento dela entrando na decisão, e
+com o motivo de cada ausência registrado.
+
+## A API
+
+| rota | o que faz |
+|---|---|
+| `GET /v1/sugestoes` | a lista, e `melhorOferta` com o ID acionável no topo |
+| `POST /v1/ofertas` | a jornada dona cadastra a própria oferta, idempotente |
+| `GET /v1/ofertas/{id}` | o estado gravado, para conferência |
+| `POST /v1/eventos` | impressão, clique e adesão — com posição |
+| `POST /v1/aprendizado/rodar` | roda a agregação agora (só no perfil `local`) |
+| `GET /actuator/health` | saúde |
+
+```jsonc
+// GET /v1/sugestoes?q=consignad   (cliente elegível)
+{
+  "prefixo": "consignad",
+  "degradada": false,
+  "melhorOferta": {
+    "ofertaId": "OFR-CREDITO-CONSIGNADO",   // o que a jornada aciona
+    "produtoAlvo": "CONSIGNADO",
+    "jornada": "credito",
+    "posicao": 0                            // liga a resposta à impressão
+  },
+  "itens": [ /* cada linha com ofertaId quando é oferta, "" quando não é */ ]
+}
+```
+
+A mesma letra, duas contas, e é aqui que o desenho se justifica:
+
+| cliente | jornada líder | topo da lista | `melhorOferta` |
+|---|---|---|---|
+| elegível | `credito` | **crédito consignado** (o produto) | `OFR-CREDITO-CONSIGNADO` |
+| sem elegibilidade | `ajuda` | como funciona o consignado (o artigo) | — |
+
+A segunda linha não é a API falhando: quem não pode contratar recebe a
+explicação, não a oferta. E `melhorOferta` ausente é **informação**, não erro.
+
+**Três formas de bater nos endpoints**, as mesmas chamadas:
+[`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) (REST Client do VS
+Code), [`requisicoes/bater.ps1`](requisicoes/bater.ps1) (terminal) e
+[`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json)
+(Postman/newman, 44 asserções).
+
+**As decisões de desenho, com o que foi recusado e por quê, estão em
+[`docs/decisoes.md`](docs/decisoes.md).**
+
 ## O que já está instalado nesta máquina
 
 O projeto foi montado sem privilégio de administrador, e por isso tudo abaixo do
@@ -359,6 +409,113 @@ produção" ao lado de um default ligado protege quem lê o arquivo, não quem f
 deploy sem ler. O perfil `local` também afrouxa os prazos para 250/100/400 ms, de
 modo que a demonstração não dependa de o Solr estar aquecido.
 
+## Resiliência
+
+São **três mecanismos**, e a confusão entre eles é o erro mais comum nesta parte
+do desenho. Cada um protege uma coisa diferente.
+
+| mecanismo | protege | quando age |
+|---|---|---|
+| **prazo por dependência** | a *requisição* | 18 ms para o Solr, 8 ms para o perfil |
+| **caminho alternativo** | a *resposta* | prazo vencido ou falha → lista degradada |
+| **disjuntor** | a *dependência e o processo* | 10 falhas nas últimas 20 chamadas |
+
+### Prazo e caminho alternativo
+
+O leque dispara Solr e perfil ao mesmo tempo, em threads virtuais, e colhe cada
+um com prazo absoluto contado **do início da requisição** — não de quando a
+espera começou. Se fosse relativo, a segunda espera ganharia de presente o tempo
+que a primeira gastou, e o orçamento de 30 ms viraria 26 sem ninguém ter
+decidido isso.
+
+Não há nova tentativa, em nenhum dos dois. A próxima tecla já vem a caminho e ela
+é a nova tentativa — com um prefixo mais específico, que é uma pergunta melhor.
+
+O perfil que não chega vira `Perfil.NEUTRO` e a resposta sai com
+`degradada: true`. O app usa isso para **não registrar a impressão como
+personalizada**: sem essa marca, a camada de aprendizado aprenderia com ruído.
+
+### O disjuntor, e por que o prazo não bastava
+
+O prazo faz a falha ser **rápida**. O disjuntor faz a falha ser **barata**.
+
+Com o Solr fora do ar e só o prazo, cada tecla digitada ainda abre uma conexão
+TCP e espera o prazo vencer. Numa caixa de busca isso são dezenas de tentativas
+por segundo contra um host morto, cada uma segurando um descritor de arquivo e
+uma thread, e nenhuma com a menor chance de responder.
+
+E há o outro lado, que quase ninguém lembra: **quando o Solr volta, ele volta
+frio**. Devolver de uma vez toda a carga que estava sendo recusada é a forma mais
+comum de derrubá-lo outra vez. É para isso que existe o meio-aberto.
+
+```
+FECHADO ──10 falhas em 20 chamadas──> ABERTO ──5 s──> MEIO_ABERTO
+   ^                                     ^                 │
+   └──────── sonda deu certo ────────────┼── sonda falhou ─┘
+                                         └── (reabre na hora)
+```
+
+Três decisões dentro disso:
+
+- **Janela, não falhas consecutivas.** Consecutivas é mais simples e não abre no
+  caso que mais importa: uma dependência que responde metade das vezes nunca
+  acumula a sequência, e metade das pessoas fica sem lista.
+- **Mínimo de chamadas antes de decidir.** Impede que uma falha isolada num Solr
+  recém-subido abra o disjuntor com amostra de tamanho um — e Solr frio estoura
+  o prazo de 18 ms legitimamente.
+- **Timeout conta como falha.** Numa camada de sugestão, lento e morto são a
+  mesma coisa: uma lista que chega depois da próxima tecla não serve para nada.
+
+**Só na porta de leitura.** O cadastro de oferta é de volume baixo, síncrono, e
+tem uma jornada esperando resposta — recusar sem tentar faria um cadastro falhar
+por causa de falhas de *outras* chamadas. A publicação roda no agendador, que já
+é o mecanismo de nova tentativa. O volume de teclas digitadas é o que justifica
+o disjuntor, e ele existe num lugar só.
+
+### Medido com o Solr derrubado
+
+Matei o processo do Solr e deixei a busca sendo chamada:
+
+```
+                          HTTP   itens   msTotal (servidor)
+Solr no ar                 200       3        6-15 ms
+Solr fora, antes de abrir  200       0       10 ms  (tenta e falha)
+Solr fora, DEPOIS de abrir 200       0        0-1 ms  (nem tenta)
+Solr de volta              200       3        6-15 ms
+```
+
+E o log do próprio disjuntor, do ciclo inteiro:
+
+```
+disjuntor 'catalogo-solr' ABERTO (10 falhas nas ultimas 13 chamadas): parando de chamar por 5000 ms
+disjuntor 'catalogo-solr' ABERTO -> MEIO_ABERTO: 2 sonda(s) liberada(s)
+disjuntor 'catalogo-solr' ABERTO (a sonda falhou): parando de chamar por 5000 ms
+disjuntor 'catalogo-solr' ABERTO -> MEIO_ABERTO: 2 sonda(s) liberada(s)
+disjuntor 'catalogo-solr' MEIO_ABERTO -> FECHADO: a dependencia voltou
+```
+
+A busca **nunca devolveu erro** e **se recuperou sozinha**, sem reiniciar o app.
+
+Duas honestidades sobre essa medição. Primeiro: medida de fora pelo
+`Invoke-WebRequest` do PowerShell, os números ficam em 80–90 ms em todos os casos
+— o custo do cliente domina e esconde o efeito. O que prova o disjuntor é o
+`msTotal` do servidor, que vai a 0–1 ms. Segundo: `localhost` recusa conexão
+instantaneamente, então aqui não há timeout a economizar. Contra um host que
+*engole* o pacote — firewall com `DROP`, ou um Solr sobrecarregado — a economia é
+o prazo inteiro, por chamada.
+
+### Reproduzir
+
+```powershell
+# com o app no ar, derrube o Solr e observe
+Get-CimInstance Win32_Process -Filter "Name='java.exe'" |
+  Where-Object { $_.CommandLine -like '*solr*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+.\requisicoes\bater.ps1 -Cenario oferta     # 200, lista vazia, nunca erro
+.\scripts\solr-local.ps1 start              # e a busca volta sozinha
+```
+
 ## Estrutura
 
 A arquitetura é hexagonal: o domínio e a aplicação são Java comum, sem nenhuma
@@ -369,7 +526,11 @@ src/main/java/dev/sugestao/busca/
 ├── dominio/                   regras. Zero Spring, zero SolrJ.
 │   ├── Prefixo, Normalizacao  normalização única, usada também pelo semeador
 │   ├── Candidato, Restricoes  linha em potencial e o que ela exige do cliente
-│   ├── Origem, Cotas          de onde veio e quanto cada origem pode ocupar
+│   ├── Sugestao, ListaDeSugestoes  a linha entregue; elege a melhor oferta
+│   ├── Origem                 onde a linha APARECE (muda sob promoção)
+│   ├── Procedencia            de onde o DADO veio (nunca muda) — decide o piso
+│   ├── Jornada                o sentinela de "sem jornada", em um lugar só
+│   ├── Cotas                  quanto cada origem pode ocupar
 │   ├── Cliente, ContextoDeBusca   token: identidade / coorte sem identidade
 │   ├── Perfil, SituacaoDaConta    comportamento e estado de conta
 │   ├── ClassificadorDeOrigem  gatilho ativo promove candidato a EVENTO
@@ -377,30 +538,45 @@ src/main/java/dev/sugestao/busca/
 │   ├── Rankeador, PesosDeRanking   escala, jornada lider, afinidade
 │   ├── Misturador             dedup, cota, limite
 │   ├── Descarte               por que cada candidato ficou de fora
+│   ├── oferta/                Oferta (o agregado e TODA a validação),
+│   │                          OfertaInvalida, Violacao
 │   ├── evento/Saneador        o portão de PII, na ingestão
 │   └── agregado/              TermoAgregado, ComportamentoDoCliente,
 │                               ClassificadorDeJornada
 │
 ├── aplicacao/
 │   ├── porta/entrada/         SugerirSugestoes, RegistrarEventos,
-│   │                          AprenderComComportamento
+│   │                          AprenderComComportamento, CadastrarOferta
 │   ├── porta/saida/           CatalogoDeSugestoes, RepositorioDePerfil,
 │   │                          FilaDeEventos, RepositorioDeAgregados,
-│   │                          PublicadorDeVocabulario, EscritorDePerfil
+│   │                          PublicadorDeVocabulario, EscritorDePerfil,
+│   │                          CatalogoCurado, RegistroDeOfertas
 │   ├── Prazos, Colheita, RastroDaSugestao, Parametros*
-│   └── casodeuso/             SugerirSugestoes (leitura),
+│   └── casodeuso/             SugerirSugestoes (leitura), CadastrarOferta,
 │                              RegistrarEventos + AprenderComComportamento (escrita)
 │
 ├── adaptador/
-│   ├── entrada/web/           controllers, DTOs, resolvedor do cliente
+│   ├── entrada/web/           controllers, DTOs, resolvedor do cliente,
+│   │                          TratadorDeErros (RFC 9457)
 │   ├── entrada/agendador/     o relógio que aciona o aprendizado
-│   └── saida/solr/            ConsultaDeCandidatos (as 4 camadas),
-│       │                      CatalogoSolr (lê), PublicadorSolr (escreve)
-│       saida/fila/            FilaEmMemoria — o lugar do MSK
-│       saida/agregado/        AgregadosEmMemoria — o lugar do job de janela
-│       saida/perfil/          PerfisEmMemoria — o lugar do DynamoDB
+│   ├── saida/solr/            ConsultaDeCandidatos (as 4 camadas),
+│   │                          CatalogoSolr (lê), PublicadorSolr (publica),
+│   │                          RegistroSolr (cadastra), CatalogoCuradoSolr
+│   ├── saida/resiliencia/     Disjuntor (máquina de estados, sem framework),
+│   │                          CatalogoComDisjuntor (DECORADOR da porta)
+│   ├── saida/fila/            FilaEmMemoria — o lugar do MSK
+│   ├── saida/agregado/        AgregadosEmMemoria — o lugar do job de janela
+│   └── saida/perfil/          PerfisEmMemoria — o lugar do DynamoDB
 │
-└── configuracao/              o único lugar que sabe quem implementa cada porta
+└── configuracao/              o único lugar que sabe quem implementa cada porta,
+                               e o único que sabe que existe disjuntor
+
+docs/decisoes.md               as decisões, com o que foi recusado e por quê
+docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respostas
+
+requisicoes/sugestoes.http     REST Client do VS Code, agrupado por pergunta
+requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
+requisicoes/postman-sugestao-busca.json   collection com 44 asserções (newman)
 
 compose.yaml                   Solr 10 em container — escrito, nunca executado
 scripts/solr-local.ps1         Solr 10 do zip, sem container e sem admin
@@ -411,6 +587,13 @@ scripts/conferir-piso.ps1      portão de publicação: k-anonimato e zero-resul
 solr/schema-sugestoes.json     payload da Schema API
 solr/README.md                 por que cada campo existe
 ```
+
+**O decorador do disjuntor é o melhor argumento que este repositório tem a favor
+da arquitetura hexagonal.** Resiliência contra uma dependência que cai é
+exatamente o tipo de requisito que costuma vazar para todo lado. Aqui ele entrou
+como dois arquivos novos em `saida/resiliencia/` mais quatro linhas na
+configuração — e o domínio, o caso de uso e o `CatalogoSolr` não souberam. Ver a
+seção *Resiliência* acima e a decisão 13.
 
 Os scripts são **ASCII puro de propósito**. O Windows PowerShell 5.1 lê `.ps1`
 sem BOM como ANSI, e um travessão dentro de uma string vira três bytes cujo
@@ -437,6 +620,12 @@ O registro completo, com o que foi recusado e por quê, está em
 - **A validação acumula todas as violações** e sai em `problem+json`. Decisão 5.
 - **`GET /v1/sugestoes` não tem caminho de erro.** Nenhuma entrada produz status
   diferente de 200. Decisão 9.
+- **O disjuntor é um decorador da porta, não código no caso de uso.** Entrou sem
+  o domínio, o caso de uso e o `CatalogoSolr` saberem — e desligá-lo é não
+  empilhar o decorador, não um disjuntor que finge estar fechado. Decisão 13.
+- **Disjuntor por fora do adaptador, nunca por dentro.** Por dentro ele contaria
+  falhas que o adaptador já pagou em rede; por fora ele recusa antes de abrir
+  conexão, que é a razão de existir.
 - **Não existe starter do Spring para Solr** desde o Boot 2.4. O SolrJ 10 entra como
   dependência comum e o client vira um `@Bean` nosso.
 - **Duas análises de prefixo**, uma para a frase e outra por palavra, com pesos
@@ -498,9 +687,25 @@ O registro completo, com o que foi recusado e por quê, está em
 2. ~~`GET /v1/sugestoes` com o leque paralelo em threads virtuais~~ — feito.
 3. ~~Registro de impressão **com posição**~~ — feito, junto do caminho de escrita
    inteiro: ingestão, saneamento, agregação em janelas e publicação pelo piso.
-4. Página de demonstração: digitar as mesmas letras com perfis diferentes.
-5. Camada 4 (LTR). Agora há impressão com posição, que era o que faltava. O que
-   falta é volume: com 101 documentos não há o que um modelo aprenda.
+4. ~~Identidade de oferta e cadastro pela jornada dona~~ — feito. `ofertaId` do
+   schema ao JSON, `melhorOferta` no topo da resposta, `POST /v1/ofertas`
+   idempotente com validação acumulada em `problem+json`.
+5. ~~Resiliência: disjuntor na porta de leitura~~ — feito, e verificado com o
+   Solr derrubado e religado. Ver a seção *Resiliência*.
+6. ~~Consumo por cliente de navegador~~ — feito: CORS configurável, desligado
+   por padrão, e [`docs/cliente-web.md`](docs/cliente-web.md) com React e
+   Angular.
+7. **Autorização no cadastro de oferta.** É o buraco mais relevante que sobrou:
+   hoje qualquer chamador cadastra em nome de qualquer jornada. O token deveria
+   carregar a jornada e o serviço *conferir* o campo do corpo contra ele.
+8. **Teste de carga com concorrência de verdade.** O que existe hoje é medição
+   sequencial (p50 12 ms, p99 26 ms, uma thread, perfil `local` com prazos
+   afrouxados). Isso compara mudanças entre si; não afirma que o orçamento de
+   18/8/30 ms de produção fecha.
+9. Página de demonstração: digitar as mesmas letras com perfis diferentes. Menos
+   urgente agora que há três formas de bater nos endpoints.
+10. Camada 4 (LTR). Agora há impressão com posição, que era o que faltava. O que
+    falta é volume: com ~102 documentos não há o que um modelo aprenda.
 
 ### O que é de mentira, e vale saber qual
 
@@ -523,7 +728,7 @@ não. Rodar `-Limpar` apaga os dois tipos e só o primeiro volta. É consequênc
 esperada de existir um caminho de escrita — o índice passa a ter estado que o
 git não tem —, mas vale saber antes de limpar achando que é idempotente.
 
-### Duas perguntas em aberto
+### Três perguntas em aberto
 
 **1. O histórico não passa pelo filtro de elegibilidade.** Ele não é uma oferta:
 é o que a pessoa já digitou. Mas o destino é o mesmo. Hoje, um cliente que buscou
@@ -543,3 +748,15 @@ inferência que acerta "contratar emprestimo" vai errar em algum termo, e errar
 numa restrição significa esconder da pessoa uma busca que ela tinha o direito de
 fazer. Restrição é decisão de quem cura. Isto deixa de ser defensável no dia em
 que a camada popular ganhar deep link para dentro de uma jornada.
+
+**3. O cliente não consegue distinguir "índice fora" de "nada casou".** Com o
+Solr derrubado, a resposta é `200` com `itens: []` e `degradada: false` — porque
+`degradada` significa "o perfil não carregou", não "o índice não carregou". Para
+a tela isso não muda nada: nos dois casos não há o que mostrar. Para quem opera,
+muda — e hoje quem conta a diferença é o log do disjuntor, não a resposta.
+
+Resolver seria acrescentar um motivo novo em `Colheita` e carregá-lo até o JSON,
+o que significa mudar a camada de aplicação para acomodar um detalhe de
+infraestrutura. Vale a pena no dia em que um cliente precisar reagir
+diferente — por exemplo, mantendo em tela a última lista boa em vez de esvaziar.
+Enquanto nenhum cliente precisa, o log basta.

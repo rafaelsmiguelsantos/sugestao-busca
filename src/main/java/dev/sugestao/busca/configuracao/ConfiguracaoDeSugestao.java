@@ -5,6 +5,8 @@ import dev.sugestao.busca.adaptador.saida.agregado.AgregadosEmMemoria;
 import dev.sugestao.busca.adaptador.saida.fila.FilaEmMemoria;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisEmMemoria;
+import dev.sugestao.busca.adaptador.saida.resiliencia.CatalogoComDisjuntor;
+import dev.sugestao.busca.adaptador.saida.resiliencia.Disjuntor;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoCuradoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.CatalogoSolr;
 import dev.sugestao.busca.adaptador.saida.solr.ConsultaDeCandidatos;
@@ -107,12 +109,43 @@ public class ConfiguracaoDeSugestao {
         return new ConsultaDeCandidatos(props.kAnonimatoMinimo(), props.tiposSugeriveis());
     }
 
+    /**
+     * O catálogo, possivelmente embrulhado no disjuntor.
+     *
+     * <p>É o único lugar do projeto que sabe que existe disjuntor, e é esse o
+     * ponto: {@code CatalogoSolr} não sabe, o caso de uso não sabe, o domínio
+     * não sabe. Empilhar decorador sobre a porta é uma linha aqui, e desligar o
+     * disjuntor é não empilhar — não um disjuntor que finge estar fechado. Um
+     * no-op passaria a existir no caminho de execução para não fazer nada, e
+     * "não fazer nada" é o tipo de coisa que, um dia, faz algo.
+     *
+     * <p>A ordem importa e é esta: disjuntor <em>por fora</em> do adaptador. Por
+     * dentro ele contaria falhas que o adaptador já teria pago em rede; por fora
+     * ele recusa antes de abrir conexão, que é a razão de existir.
+     */
     @Bean
     public CatalogoDeSugestoes catalogoDeSugestoes(
             @Qualifier("solrDeLeitura") SolrClient solr,
             SugestaoProperties props,
             ConsultaDeCandidatos consulta) {
-        return new CatalogoSolr(solr, props.solr().colecao(), consulta);
+
+        var catalogo = new CatalogoSolr(solr, props.solr().colecao(), consulta);
+
+        var config = props.disjuntor() == null
+                ? SugestaoProperties.Disjuntor.padrao()
+                : props.disjuntor();
+
+        if (!config.habilitado()) {
+            return catalogo;
+        }
+
+        return new CatalogoComDisjuntor(catalogo, new Disjuntor(
+                "catalogo-solr",
+                config.janela(),
+                config.minimoDeChamadas(),
+                config.limiteDeFalhas(),
+                Duration.ofMillis(config.esperaMs()),
+                config.sondas()));
     }
 
     /**
