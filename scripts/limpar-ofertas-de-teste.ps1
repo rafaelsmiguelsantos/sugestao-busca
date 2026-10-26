@@ -35,9 +35,18 @@
 #>
 [CmdletBinding()]
 param(
-    # O que a collection de exploracao cria na pasta 3. O 'OFR-CREDITO-TESTE-'
-    # vem do prerequest, que concatena o epoch para o POST ser repetivel.
-    [string] $Padrao = '^OFR-CREDITO-TESTE-\d+$',
+    # Tudo o que os quatro arreios de teste criam no indice.
+    #
+    # Era so '^OFR-CREDITO-TESTE-\d+$', o id que a collection de exploracao gera
+    # na pasta 3. Nao bastava: o newman e o sondar.ps1 criam outros, e eles
+    # SOBREVIVEM a rodada. Numa demonstracao, "fundo multimercado invadido" ou
+    # "oferta de corrida" aparecendo na lista e pior do que parece - a pessoa
+    # assistindo nao sabe que e residuo de teste, e a primeira impressao e de
+    # catalogo sujo.
+    #
+    # Rodar isto antes de apresentar e um passo do roteiro, nao uma faxina
+    # opcional.
+    [string] $Padrao = '^OFR-(CREDITO-TESTE-\d+|TESTE-|SONDA-|SEQ-|.*-AUTHZ|INVADIDA|CREDITO-CORRIDA|CREDITO-CONFERE-|CREDITO-ISOLADO-|CREDITO-REPRO|PREVIDENCIA-VGBL-NEWMAN)',
 
     [string] $Solr = 'http://localhost:8983/solr/sugestoes',
 
