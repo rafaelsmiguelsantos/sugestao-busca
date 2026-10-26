@@ -67,7 +67,7 @@ public class FilaEmMemoria implements FilaDeEventos {
         return tamanho.get();
     }
 
-    /** Quantos eventos a fila jogou fora por lotação. Acima de zero é alarme. */
+    @Override
     public int descartadosPorLotacao() {
         return descartadosPorLotacao.get();
     }

@@ -107,6 +107,7 @@ public class AprenderComComportamentoCasoDeUso implements AprenderComComportamen
                 retidos.size(),
                 comportamentos.size(),
                 agregados.perfisNoTetoDeFadiga(),
+                fila.descartadosPorLotacao(),
                 // Só o relatório operacional vê termo retido, e só alguns. Eles
                 // são, por definição, os que vieram de gente de menos — é
                 // exatamente o conjunto que não deve circular.

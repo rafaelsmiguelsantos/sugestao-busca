@@ -80,10 +80,16 @@ public final class Rankeador {
     /**
      * O fator de um candidato: promoções, teto, fadiga.
      *
-     * <p>Exposto para o rastro poder mostrar o número que moveu a linha. Ver
-     * {@link #fadigaDe}, que o complementa.
+     * <p>Privado de novo, e vale registrar por quê. Ele foi público por um tempo
+     * com a justificativa "exposto para o rastro poder mostrar o número que moveu
+     * a linha" — e <strong>o rastro nunca o chamou</strong>. Comentário que
+     * justifica uma decisão por um uso inexistente é pior que comentário nenhum:
+     * ele faz o leitor seguinte preservar algo que não precisa existir.
+     *
+     * <p>O que o rastro de fato precisa é só da fadiga, separada da promoção —
+     * ver {@link #fadigaDe}, que é público e <em>é</em> chamado.
      */
-    public double fator(Candidato candidato, Perfil perfil, String lider, PesosDeRanking pesos) {
+    private double fator(Candidato candidato, Perfil perfil, String lider, PesosDeRanking pesos) {
         double fator = 1.0;
 
         if (!lider.isBlank() && lider.equals(candidato.jornada())) {
@@ -131,10 +137,16 @@ public final class Rankeador {
     /**
      * O multiplicador da fadiga: 1,0 sem fadiga, {@code fadigaMinima} no teto.
      *
-     * <p>Separado para o rastro poder registrar o rebaixamento à parte da
-     * promoção. Sem isso, a explicação mostraria um fator só e ninguém saberia se
-     * a linha está baixa por não ter sido promovida ou por ter sido rebaixada —
-     * que são diagnósticos opostos.
+     * <p>Público e chamado pelo caso de uso, que o carrega até a explicação. Sem
+     * isso, a resposta mostraria um número só e ninguém saberia se a linha está
+     * baixa por <em>não ter sido promovida</em> ou por <em>ter sido rebaixada</em>
+     * — e os dois pedem ações opostas: o primeiro é ausência de sinal, o segundo
+     * é sinal contrário.
+     *
+     * <p>É também o que cumpre a parte da invariante que faltava. Ao quebrar o
+     * "os sinais só promovem" do cabeçalho desta classe, a justificativa escrita
+     * foi: rebaixar é permitido, apagar não, <strong>e todo rebaixamento vai para
+     * o rastro</strong>. A terceira parte ficou sem implementação por uma rodada.
      */
     public double fadigaDe(Candidato candidato, Perfil perfil, PesosDeRanking pesos) {
         double fadiga = perfil.fadigaDe(candidato.termo());

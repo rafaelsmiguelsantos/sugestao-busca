@@ -12,7 +12,7 @@
 | | |
 |---|---|
 | **feito e verificado** | busca com perfil, cadastro por jornada, caminho de escrita, autenticação, resiliência, tolerância a erro de digitação, três sinais de comportamento, medição de qualidade, limite de taxa |
-| **medido** | 528 req/s · p50 9 ms · p99 33 ms · 173 testes · 56 asserções de contrato · 47 sondas sem achados |
+| **medido** | 530–680 req/s · p50 8–10 ms · p99 ~30 ms · 174 testes · 56 asserções de contrato · 55 sondas sem achados |
 | **em memória, de propósito** | fila de eventos, agregação, perfil |
 | **não existe** | aprendizado de máquina |
 

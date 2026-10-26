@@ -536,11 +536,11 @@ dali valem olhar na sua integração:
 
 ## Medido nesta implementação
 
-p50 de 9,9 ms e p99 de 32 ms; 546 req/s com 40 chamadas em paralelo e nenhuma
+p50 de 8–10 ms e p99 da ordem de 30 ms; entre 530 e 680 req/s com 40 chamadas
 falha, em 400 requisições. Cliente, serviço e índice na mesma máquina — serve para
 comparar mudanças, **não para dimensionar capacidade**.
 
-Verificado: 173 testes de unidade, 56 asserções de contrato e 47 sondas
+Verificado: 174 testes de unidade, 56 asserções de contrato e 55 sondas
 adversariais, mais um caçador de teste instável que roda a suíte sob contenção de
 CPU ([`scripts/cacar-flaky.ps1`](../scripts/cacar-flaky.ps1)). Três asserções deste
 projeto afirmavam igualdade exata sobre valor decaído e passavam por sorte; a última

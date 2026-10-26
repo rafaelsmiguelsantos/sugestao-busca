@@ -358,7 +358,7 @@ if (Rodar 8) {
     Destaque 'EM PARALELO - e elas podem correr em paralelo porque segmento e faixa'
     Destaque 'vem do token, conhecidos antes de qualquer leitura de perfil.'
 
-    Fala 'Sob carga, nesta maquina: 528 req/s, p50 9 ms, p99 33 ms, zero falhas.' `
+    Fala 'Sob carga, nesta maquina: 530-680 req/s, p50 8-10 ms, p99 ~30 ms, zero falhas.' `
          'Cliente, servico e indice juntos - serve para comparar mudancas, NAO' `
          'para dimensionar capacidade.'
     Pausa
@@ -366,7 +366,7 @@ if (Rodar 8) {
 
 Write-Host ''
 Write-Host ('=' * 78) -ForegroundColor DarkCyan
-Write-Host '  Fim. O raciocinio de cada decisao esta em docs/decisoes.md (23).' -ForegroundColor Cyan
+Write-Host '  Fim. O raciocinio de cada decisao esta em docs/decisoes.md (25).' -ForegroundColor Cyan
 Write-Host '  O que e de mentira e o que falta: README, "Limitacoes conhecidas".' -ForegroundColor Cyan
 Write-Host ('=' * 78) -ForegroundColor DarkCyan
 Write-Host ''

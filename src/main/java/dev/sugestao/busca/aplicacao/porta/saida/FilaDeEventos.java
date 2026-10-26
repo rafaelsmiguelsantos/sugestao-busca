@@ -25,4 +25,25 @@ public interface FilaDeEventos {
     List<EventoDeBusca> consumir(int maximo);
 
     int pendentes();
+
+    /**
+     * Quantos eventos a fila jogou fora por lotação. Acima de zero é alarme.
+     *
+     * <p>Está na porta porque <strong>descarte silencioso é o pior modo de falha
+     * do caminho de escrita</strong>: a ingestão responde {@code 202}, o app
+     * acredita que o evento entrou, e o aprendizado nunca o vê. Nada no sistema
+     * fica diferente, e o sintoma é a personalização simplesmente piorar com o
+     * aumento de tráfego — o momento em que ninguém está procurando um contador.
+     *
+     * <p>O teto existe para o POC não consumir a memória da máquina se o
+     * agendador parar. Ele é a decisão certa; não contar quanto ele descartou
+     * não era. Mesma lógica de {@code retidosPeloPiso} e do teto da fadiga:
+     * limite que ninguém mede é limite que alguém afrouxa por palpite.
+     *
+     * <p>O padrão é zero para implementação que não tenha teto — uma fila de
+     * verdade não descarta, ela aplica contrapressão.
+     */
+    default int descartadosPorLotacao() {
+        return 0;
+    }
 }

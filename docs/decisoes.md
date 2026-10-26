@@ -89,10 +89,20 @@ promovido continua respondendo.
 `(*:* -tipo:consulta) OR clientes_distintos_i:[30 TO *]` — "ou não é termo do
 log, ou limpa o piso".
 
-**Medido depois da mudança**, em 102 documentos: 94 visíveis (os 8 que faltam são
-os termos de log abaixo do piso), 19 ofertas visíveis com `clientes_distintos=0`,
-e **zero** termos de log abaixo do piso alcançáveis. Sob o `fq` anterior eram 49
-visíveis — ele escondia as 44 linhas de catálogo assim que o contador falso saiu.
+**Medido**, no índice semeado de 99 documentos: 91 alcançáveis (os 8 que faltam são
+exatamente os termos de log abaixo do piso), 18 ofertas com `clientes_distintos=0`
+todas visíveis, e **zero** termos de log abaixo do piso alcançáveis por qualquer
+prefixo — conferido por `scripts/conferir-piso.ps1`, que testa 88 prefixos nos dois
+segmentos.
+
+Sob o `fq` anterior eram 49 visíveis: ele escondia as linhas de catálogo no mesmo
+instante em que o contador falso saiu delas.
+
+> Os números acima mudam quando o índice é semeado de novo ou quando uma oferta é
+> cadastrada — o que invalida a contagem, não a invariante. O que não muda é a
+> última linha: **zero alcançáveis abaixo do piso**, e é ela que o
+> `conferir-piso.ps1` verifica a cada execução. Citar a contagem sem dizer isso foi
+> o que deixou este parágrafo vencido por uma rodada.
 
 ---
 
@@ -968,6 +978,72 @@ palpite.
 
 **Verificado ao vivo:** 70 termos cansados para um cliente, rodada devolveu
 `perfisNoTetoDeFadiga: 1`, e a busca continuou respondendo normalmente.
+
+---
+
+## 24. A invariante que estava escrita e não estava implementada
+
+**O achado.** A decisão 18 e o javadoc do `Rankeador` justificam quebrar o "os
+sinais só promovem" com três partes: *rebaixar é permitido, apagar não, **e todo
+rebaixamento vai para o rastro***.
+
+A terceira parte era falsa. Nem `RastroDaSugestao.Linha` nem
+`Explicacao.LinhaPontuada` tinham fadiga. A relevância já vinha com ela aplicada, e
+quem olhasse uma linha baixa **não tinha como distinguir "não foi promovida" de
+"foi rebaixada"** — ausência de sinal contra sinal contrário, que pedem ações
+opostas: o primeiro se resolve com catálogo, o segundo é a pessoa dizendo que não
+quer aquilo.
+
+**E dois métodos documentavam um uso que não existia.** `Rankeador.fator()` era
+público com o javadoc "exposto para o rastro poder mostrar o número que moveu a
+linha" — **zero chamadas**. `Rankeador.fadigaDe()`, idem: "separado para o rastro
+poder registrar o rebaixamento", chamado só de dentro da própria classe.
+
+Num projeto cuja tese é *os comentários registram o raciocínio*, comentário que
+justifica uma decisão por um uso inexistente é pior que comentário nenhum: ele faz
+o leitor seguinte preservar algo que não precisa existir, e corrói a confiança em
+todos os outros comentários — que estão certos.
+
+**Consertado implementando, não corrigindo o texto.** A fadiga vai para o rastro
+como campo próprio, separada da relevância, e sai na explicação:
+
+```
+pos 0  rel=3,449  fadiga=1,0   consultoria de investimentos
+pos 2  rel=1,850  fadiga=0,6   CDB          ← rebaixada, e visível
+```
+
+`fator()` voltou a ser privado; `fadigaDe()` ficou público **e agora é chamado**.
+
+**E foi mais longe do que o rastro.** A explicação fica **desligada em produção**,
+porque a lista de descartes conta quais produtos a pessoa não pode contratar. Sem
+métrica, o único sinal do projeto que rebaixa seria invisível justamente onde ele
+age de verdade. Daí `sugestao.linhas.rebaixadas`, que também responde à pergunta de
+calibragem: quase nada rebaixado significa piso de evidência alto demais para ter
+efeito; quase tudo significa lista sendo achatada.
+
+---
+
+## 25. Descarte silencioso da fila, agora contado
+
+**O achado.** `FilaEmMemoria` tem teto (`teto-da-fila=50000`) e incrementa
+`descartadosPorLotacao` quando estoura. **Nada lia esse contador.** O método existia
+com javadoc dizendo "acima de zero é alarme", e não havia alarme.
+
+**É o pior modo de falha do caminho de escrita.** A ingestão responde `202`, o app
+acredita que o evento entrou, e o aprendizado nunca o vê. Nada no sistema fica
+diferente — o sintoma é a personalização piorar conforme o tráfego cresce, que é
+exatamente quando ninguém está procurando um contador de descarte.
+
+O teto é a decisão certa: ele existe para o POC não consumir a memória da máquina
+se o agendador parar. **Não contar quanto ele descartou não era.**
+
+Agora sai em `ResultadoDoAprendizado.eventosDescartadosPorLotacao`, e no resumo da
+rodada **só quando é diferente de zero** — campo que vale zero em toda linha de log
+treina quem lê a ignorar, e aí deixa de servir quando finalmente importa.
+
+> Em produção isto desaparece com a fila de verdade: MSK não descarta, aplica
+> contrapressão. O padrão do método na porta é zero, para implementação que não
+> tenha teto.
 
 ---
 

@@ -48,9 +48,5 @@ public enum ToleranciaAplicada {
      * casa com nada porque falta sinônimo, e nenhuma distância de edição
      * conserta falta de vocabulário.
      */
-    ACIONADA_SEM_GANHO;
-
-    public boolean acionada() {
-        return this == ACIONADA_COM_GANHO || this == ACIONADA_SEM_GANHO;
-    }
+    ACIONADA_SEM_GANHO
 }

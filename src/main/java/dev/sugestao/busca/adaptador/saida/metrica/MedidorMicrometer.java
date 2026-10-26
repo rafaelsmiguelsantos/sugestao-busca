@@ -48,6 +48,7 @@ public class MedidorMicrometer implements MedidorDeBusca {
 
     private static final String BUSCAS = "sugestao.buscas";
     private static final String DESCARTES = "sugestao.descartes";
+    private static final String REBAIXADAS = "sugestao.linhas.rebaixadas";
     private static final String TOLERANCIA = "sugestao.tolerancia";
     private static final String LATENCIA = "sugestao.latencia";
     private static final String CLIQUES = "sugestao.cliques";
@@ -106,6 +107,21 @@ public class MedidorMicrometer implements MedidorDeBusca {
         // não para a busca — que foi exatamente o caso real.
         for (var descarte : rastro.descartes()) {
             registro.counter(DESCARTES, "motivo", descarte.motivo().name()).increment();
+        }
+
+        // O rebaixamento por fadiga também é contado, e isto fecha um buraco.
+        //
+        // Ele já aparece linha por linha na explicação — mas a explicação fica
+        // DESLIGADA em produção, porque a lista de descartes conta quais produtos
+        // a pessoa não pode contratar. Sem a métrica, o único sinal do projeto
+        // que rebaixa seria invisível justamente onde ele age de verdade.
+        //
+        // E o número responde a uma pergunta de calibragem: se quase nada é
+        // rebaixado, o piso de evidência está alto demais para ter efeito; se
+        // quase tudo é, está baixo demais e a lista está sendo achatada.
+        long rebaixadas = rastro.linhasRebaixadas();
+        if (rebaixadas > 0) {
+            registro.counter(REBAIXADAS).increment(rebaixadas);
         }
     }
 

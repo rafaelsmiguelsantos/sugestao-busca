@@ -33,6 +33,22 @@ public record ResultadoDoAprendizado(
          */
         int perfisNoTetoDeFadiga,
 
+        /**
+         * Quantos eventos a fila jogou fora por lotação, desde a subida.
+         *
+         * <p><strong>Acima de zero é alarme, e é o pior modo de falha do caminho
+         * de escrita.</strong> A ingestão respondeu {@code 202}, o app acredita
+         * que o evento entrou, e o aprendizado nunca o viu. Nada fica diferente
+         * no sistema — o sintoma é a personalização piorar conforme o tráfego
+         * cresce, que é exatamente quando ninguém procura um contador de
+         * descarte.
+         *
+         * <p>Diferente dos outros números deste record, ele é <em>acumulado</em>
+         * e não por rodada: um descarte que aconteceu há dez minutos continua
+         * sendo um evento perdido.
+         */
+        int eventosDescartadosPorLotacao,
+
         List<String> exemplosRetidos) {
 
     public ResultadoDoAprendizado {
@@ -40,8 +56,15 @@ public record ResultadoDoAprendizado(
     }
 
     public String resumo() {
-        return "eventos=%d termos=%d publicados=%d retidos=%d perfis=%d fadigaNoTeto=%d"
+        // O descarte por lotação só entra na linha quando é diferente de zero, e
+        // isso é deliberado: um campo que vale zero em toda linha de log treina
+        // quem lê a ignorar, e aí ele deixa de servir quando finalmente importa.
+        String perdidos = eventosDescartadosPorLotacao > 0
+                ? " PERDIDOS=" + eventosDescartadosPorLotacao
+                : "";
+
+        return "eventos=%d termos=%d publicados=%d retidos=%d perfis=%d fadigaNoTeto=%d%s"
                 .formatted(eventosConsumidos, termosAvaliados, termosPublicados,
-                        retidosPeloPiso, perfisAtualizados, perfisNoTetoDeFadiga);
+                        retidosPeloPiso, perfisAtualizados, perfisNoTetoDeFadiga, perdidos);
     }
 }

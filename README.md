@@ -8,7 +8,7 @@ motivo de cada ausência registrado.
 [![Java](https://img.shields.io/badge/Java-25-b07219)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6db33f)](https://spring.io/projects/spring-boot)
 [![Apache Solr](https://img.shields.io/badge/Apache%20Solr-10.0-d9411e)](https://solr.apache.org/)
-[![Testes](https://img.shields.io/badge/testes-173%20verdes-success)](#como-contribuir)
+[![Testes](https://img.shields.io/badge/testes-174%20verdes-success)](#como-contribuir)
 [![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-blue)](LICENSE)
 
 | se você quer | vá para |
@@ -16,7 +16,7 @@ motivo de cada ausência registrado.
 | **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 36 requisições em 7 pastas |
-| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 23 decisões, com o que foi **recusado** e por quê |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 25 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 | ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
@@ -214,7 +214,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 | documento | o que responde |
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
-| [`docs/decisoes.md`](docs/decisoes.md) | 23 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/decisoes.md`](docs/decisoes.md) | 25 decisões de desenho, com o que foi **recusado** e por quê |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
@@ -1083,7 +1083,7 @@ docs/guia-api.html             guia de integração em 10 passos (abre no navega
 
 requisicoes/sugestoes.http     REST Client do VS Code, agrupado por pergunta
 requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
-requisicoes/sondar.ps1         47 sondas adversariais em 5 grupos
+requisicoes/sondar.ps1         55 sondas adversariais em 6 grupos
 requisicoes/verificar-comportamento.ps1   afinidade de produto e fadiga, ao vivo
 requisicoes/demonstrar.ps1     roteiro de apresentação em oito atos
 requisicoes/postman-exploracao.json       36 requisições em 7 pastas, para clicar
@@ -1217,7 +1217,7 @@ O registro completo, com o que foi recusado e por quê, está em
 
 ## Próximos passos
 
-1. ~~Vocabulário sintético~~ — feito, mas com **95 termos, não os 2 a 5 mil** do
+1. ~~Vocabulário sintético~~ — feito, mas com **99 documentos, não os 2 a 5 mil termos** do
    desenho. O mecanismo inteiro aparece com esse tamanho; o que não aparece é
    concorrência de verdade entre candidatos no mesmo prefixo.
 2. ~~`GET /v1/sugestoes` com o leque paralelo em threads virtuais~~ — feito.
@@ -1234,14 +1234,17 @@ O registro completo, com o que foi recusado e por quê, está em
 7. ~~Autenticação e autorização~~ — feito. Servidor de recurso OAuth 2.0, escopo
    por rota, `denyAll` por padrão, e a jornada do token conferida contra o corpo
    do cadastro. Ver *Autenticação e autorização*.
-8. **Teste de carga com concorrência de verdade.** O que existe hoje é medição
-   sequencial (p50 12 ms, p99 26 ms, uma thread, perfil `local` com prazos
-   afrouxados). Isso compara mudanças entre si; não afirma que o orçamento de
-   18/8/30 ms de produção fecha.
+8. **Teste de carga em escala, com perfis de produção.** Há duas medições hoje, e
+   as duas são pequenas: sequencial (p50 12 ms, p99 26 ms, uma thread, via
+   `bater.ps1 -Cenario latencia`) e **concorrente** (40 chamadas em paralelo,
+   400 requisições, 530–680 req/s, via `sondar.ps1`). As duas rodam com cliente,
+   serviço e índice na mesma máquina, e no perfil `local` com os prazos
+   afrouxados para 250/100/400 ms. Elas comparam mudanças entre si; **não**
+   afirmam que o orçamento de 18/8/30 ms de produção fecha.
 9. Página de demonstração: digitar as mesmas letras com perfis diferentes. Menos
    urgente agora que há três formas de bater nos endpoints.
 10. Camada 4 (LTR). Agora há impressão com posição, que era o que faltava. O que
-    falta é volume: com ~102 documentos não há o que um modelo aprenda.
+    falta é volume: com ~100 documentos não há o que um modelo aprenda.
 
 ## Limitações conhecidas
 
@@ -1325,9 +1328,9 @@ alcança, para isso parar de ser descoberta manual.
 
 ```powershell
 $env:JAVA_HOME = '<seu JDK 25>'
-.\mvnw test                                  # 173 testes
+.\mvnw test                                  # 174 testes
 .\scripts\cacar-flaky.ps1 -Rodadas 10        # caça teste instável sob carga
-.\requisicoes\sondar.ps1                     # 47 sondas adversariais
+.\requisicoes\sondar.ps1                     # 55 sondas adversariais
 npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json   # 56 asserções
 ```
 

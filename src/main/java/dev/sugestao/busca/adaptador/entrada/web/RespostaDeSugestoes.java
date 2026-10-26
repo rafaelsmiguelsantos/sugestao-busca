@@ -123,7 +123,19 @@ public record RespostaDeSugestoes(
         public record ItemDescartado(String termo, String origem, String motivo) {
         }
 
-        public record LinhaPontuada(int posicao, String termo, String origem, double relevancia) {
+        /**
+         * O {@code fadiga} vem separado da {@code relevancia} de propósito.
+         *
+         * <p>A relevância já traz a fadiga aplicada. Mostrar só ela deixaria
+         * indistinguíveis dois casos opostos: a linha está baixa porque
+         * <em>não foi promovida</em> (ausência de sinal) ou porque <em>foi
+         * rebaixada</em> (sinal contrário). O primeiro se resolve com catálogo,
+         * o segundo é a pessoa dizendo que não quer aquilo.
+         *
+         * <p>Vale 1,0 quando não houve rebaixamento.
+         */
+        public record LinhaPontuada(int posicao, String termo, String origem,
+                                    double relevancia, double fadiga) {
         }
     }
 
@@ -200,7 +212,8 @@ public record RespostaDeSugestoes(
                         .toList(),
                 rastro.linhas().stream()
                         .map(l -> new Explicacao.LinhaPontuada(
-                                l.posicao(), l.termo(), l.origem().name(), l.relevancia()))
+                                l.posicao(), l.termo(), l.origem().name(),
+                                l.relevancia(), l.fadiga()))
                         .toList());
     }
 }

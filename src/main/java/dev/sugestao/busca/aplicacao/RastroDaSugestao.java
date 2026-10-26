@@ -79,14 +79,42 @@ public record RastroDaSugestao(
      * possível com o que estava medido.
      */
     public record Linha(int posicao, String ofertaId, String termo, Origem origem,
-                        double relevancia, String destino) {
+                        double relevancia,
+
+                        /**
+                         * O fator de fadiga aplicado a esta linha: 1,0 quando
+                         * nenhuma, até o piso configurado quando no teto.
+                         *
+                         * <p><strong>Existe para cumprir uma invariante que estava
+                         * documentada e não estava implementada.</strong> A fadiga
+                         * é o único sinal que rebaixa, e a justificativa escrita
+                         * para quebrar o "os sinais só promovem" do
+                         * {@code Rankeador} tinha três partes: rebaixar é
+                         * permitido, apagar não, <em>e todo rebaixamento vai para
+                         * o rastro</em>.
+                         *
+                         * <p>A terceira parte era falsa. Sem ela, quem olha uma
+                         * linha baixa não distingue <em>não foi promovida</em> de
+                         * <em>foi rebaixada</em> — que são diagnósticos opostos: o
+                         * primeiro é ausência de sinal, o segundo é sinal
+                         * contrário. Aparece agora na explicação.
+                         */
+                        double fadiga,
+
+                        String destino) {
 
         public Linha {
             ofertaId = ofertaId == null ? "" : ofertaId;
+            fadiga = fadiga <= 0 ? 1.0 : fadiga;
         }
 
         public boolean ehOferta() {
             return !ofertaId.isBlank();
+        }
+
+        /** Se esta linha perdeu posição por ter sido exibida e ignorada. */
+        public boolean rebaixada() {
+            return fadiga < 1.0;
         }
     }
 
@@ -121,5 +149,10 @@ public record RastroDaSugestao(
     /** Alguma linha entregue é oferta acionável. */
     public boolean temOferta() {
         return linhas.stream().anyMatch(Linha::ehOferta);
+    }
+
+    /** Quantas linhas foram rebaixadas pela fadiga. */
+    public long linhasRebaixadas() {
+        return linhas.stream().filter(Linha::rebaixada).count();
     }
 }

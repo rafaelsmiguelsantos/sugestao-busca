@@ -185,7 +185,19 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         for (int i = 0; i < mistura.escolhidos().size(); i++) {
             var c = mistura.escolhidos().get(i);
             linhas.add(new RastroDaSugestao.Linha(
-                    i, c.ofertaId(), c.termo(), c.origem(), c.relevancia(), c.destino()));
+                    i, c.ofertaId(), c.termo(), c.origem(), c.relevancia(),
+                    // A fadiga vai para o rastro separada da relevância, e não
+                    // embutida nela. É o que cumpre a invariante declarada ao
+                    // quebrar o "os sinais só promovem" do Rankeador: todo
+                    // rebaixamento tem de ser visível.
+                    //
+                    // Recalculada aqui, e não guardada no Candidato, porque é
+                    // leitura de dois mapas e uma multiplicação sobre, no máximo,
+                    // oito linhas — mais barato que carregar um campo a mais por
+                    // todo o pipeline, e o Candidato fica sem um campo que só a
+                    // explicação usa.
+                    rankeador.fadigaDe(c, perfil, parametros.pesos()),
+                    c.destino()));
         }
 
         var rastro = new RastroDaSugestao(

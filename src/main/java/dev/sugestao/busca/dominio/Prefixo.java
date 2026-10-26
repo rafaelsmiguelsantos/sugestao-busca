@@ -39,8 +39,4 @@ public record Prefixo(String valor) {
         return valor.length() > maximo;
     }
 
-    /** O tamanho entra no modelo da camada 4 como {@code efi.prefixo_len}. */
-    public int tamanho() {
-        return valor.length();
-    }
 }

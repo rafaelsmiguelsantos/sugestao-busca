@@ -16,7 +16,4 @@ public record Restricoes(
 
     public static final Restricoes NENHUMA = new Restricoes(false, false, false);
 
-    public boolean algumaDependeDoPerfil() {
-        return exigeElegibilidade || vetaInadimplencia || exigeContaAtiva;
-    }
 }

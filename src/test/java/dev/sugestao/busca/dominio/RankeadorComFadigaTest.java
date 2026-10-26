@@ -124,6 +124,35 @@ class RankeadorComFadigaTest {
     }
 
     @Test
+    @DisplayName("o rebaixamento é observável: fadigaDe devolve o fator à parte da promoção")
+    void rebaixamentoEhObservavel() {
+        // A JUSTIFICATIVA DA INVARIANTE QUEBRADA, agora verificada.
+        //
+        // Quebrar o "os sinais só promovem" do Rankeador foi justificado com três
+        // partes: rebaixar é permitido, apagar não, E TODO REBAIXAMENTO VAI PARA O
+        // RASTRO. A terceira ficou sem implementação por uma rodada — o método
+        // existia, era público com javadoc dizendo "para o rastro", e o rastro
+        // nunca o chamou.
+        //
+        // Este teste trava o contrato de que o fator é obtível separado, porque é
+        // disso que a explicação precisa: quem olha uma linha baixa tem de
+        // distinguir "não foi promovida" de "foi rebaixada" — ausência de sinal
+        // contra sinal contrário, que pedem ações opostas.
+        var candidato = candidato("antecipar limite", "credito", "ANTECIPACAO", 1.0);
+
+        var semFadiga = perfil(Map.of(), Map.of(), Map.of(), Map.of());
+        var comFadiga = perfil(Map.of(), Map.of(), Map.of(), Map.of("antecipar limite", 1.0));
+
+        assertThat(rankeador.fadigaDe(candidato, semFadiga, PESOS))
+                .as("sem fadiga, o fator é neutro e a linha não foi rebaixada")
+                .isEqualTo(1.0);
+
+        assertThat(rankeador.fadigaDe(candidato, comFadiga, PESOS))
+                .as("com fadiga no teto, o fator é o piso configurado")
+                .isCloseTo(PESOS.fadigaMinima(), within(0.0001));
+    }
+
+    @Test
     @DisplayName("a fadiga casa termo com acento: a chave é normalizada na leitura")
     void fadigaCasaTermoComAcento() {
         // REGRESSÃO. A agregação guarda a chave normalizada — "antecipacao de

@@ -805,12 +805,12 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
 
   <footer class="rodape">
     <p>
-      Medido nesta implementação: p50 de 9,9&nbsp;ms e p99 de 32&nbsp;ms; 546&nbsp;req/s com 40
+      Medido nesta implementação: p50 de 8–10&nbsp;ms e p99 da ordem de 30&nbsp;ms; entre 530 e 680&nbsp;req/s com 40
       chamadas em paralelo e nenhuma falha, em 400 requisições. Cliente, serviço e índice na mesma
       máquina — serve para comparar mudanças, não para dimensionar capacidade.
     </p>
     <p>
-      Verificado: 173 testes de unidade, 56 asserções de contrato e 47 sondas adversariais, mais um
+      Verificado: 174 testes de unidade, 56 asserções de contrato e 55 sondas adversariais, mais um
       caçador de teste instável que roda a suíte sob contenção de CPU —
       <code>scripts/cacar-flaky.ps1</code>. Três asserções deste projeto afirmavam igualdade exata
       sobre valor decaído e passavam por sorte; a última só apareceu com os doze núcleos ocupados.

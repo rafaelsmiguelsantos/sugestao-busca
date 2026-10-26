@@ -26,7 +26,4 @@ public record Colheita<T>(T valor, Motivo motivo) {
         return new Colheita<>(valor, Motivo.RESPONDEU);
     }
 
-    public boolean usouAlternativa() {
-        return motivo != Motivo.RESPONDEU;
-    }
 }
