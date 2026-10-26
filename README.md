@@ -19,6 +19,8 @@ motivo de cada ausência registrado.
 | entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 23 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
+| ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
+| saber o que vem depois | [`docs/proximos-passos.md`](docs/proximos-passos.md) — a ordem, e o porquê de cada posição |
 
 > Arquitetura hexagonal, e os comentários do código registram o raciocínio e o que
 > foi descartado — não o óbvio. É deliberado, e é metade do que este repositório
@@ -214,6 +216,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
 | [`docs/decisoes.md`](docs/decisoes.md) | 23 decisões de desenho, com o que foi **recusado** e por quê |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
+| [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
 | [`docs/guia-api.html`](docs/guia-api.html) | o mesmo guia em página, para compartilhar ou imprimir |
 
@@ -1082,6 +1085,7 @@ requisicoes/sugestoes.http     REST Client do VS Code, agrupado por pergunta
 requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
 requisicoes/sondar.ps1         47 sondas adversariais em 5 grupos
 requisicoes/verificar-comportamento.ps1   afinidade de produto e fadiga, ao vivo
+requisicoes/demonstrar.ps1     roteiro de apresentação em oito atos
 requisicoes/postman-exploracao.json       36 requisições em 7 pastas, para clicar
 requisicoes/postman-sugestao-busca.json   collection com 56 asserções (newman)
 

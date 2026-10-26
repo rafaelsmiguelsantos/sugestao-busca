@@ -1016,6 +1016,31 @@ consignado, e recebe zero oferta, continua recebendo zero. Foi levantado,
 analisado, e deixado de fora desta rodada porque a decisão é de produto — oferecer
 substituto é aceitável neste contexto? — e não de engenharia.
 
+**O `Content-Type` de sucesso e de erro discordam sobre charset.** O caminho de
+erro devolve `application/problem+json;charset=UTF-8` — escrito à mão em
+`ConfiguracaoDeSeguranca` e no `TratadorDeErros`. O de sucesso devolve
+`application/json` puro, que é o padrão do Spring.
+
+**Os dois estão defensáveis; a inconsistência não.** A
+[RFC 8259](https://www.rfc-editor.org/rfc/rfc8259) define JSON como UTF-8 e **não**
+define parâmetro de charset para `application/json`, então o Spring está certo em
+omitir e um cliente correto assume UTF-8.
+
+O problema é que cliente legado não assume. O `Invoke-RestMethod` do PowerShell
+5.1 cai para ISO-8859-1 quando falta charset, e `crédito consignado` chega como
+`crÃ©dito consignado` **na string em memória** — não é artefato de console. O mesmo
+vale para .NET Framework antigo e para algumas bibliotecas Java anteriores.
+Descoberto escrevendo o roteiro de demonstração, que mostraria isso na tela.
+
+Por ora o conserto ficou no cliente — `requisicoes/demonstrar.ps1` decodifica os
+bytes à mão — porque mudar o servidor exige mexer em negociação de conteúdo, e isso
+não se faz na véspera de apresentar. A decisão pendente é qual lado uniformizar:
+acrescentar `;charset=UTF-8` ao sucesso (custo semântico zero, e poupa todo
+consumidor legado de descobrir isso sozinho) ou remover do erro, ficando
+estritamente com a RFC. **A primeira é a que eu recomendaria**, pelo mesmo
+raciocínio das outras decisões deste documento: o custo de ser generoso é zero, e o
+custo de não ser cai sobre quem integra.
+
 **A afinidade não distingue clique de arrepender.** Clicar e voltar em dois
 segundos conta igual a clicar e contratar — o `SUGESTAO_CLICADA` não tem duração
 nem desfecho. Um sinal de permanência (`tempo até voltar`) separaria interesse de
