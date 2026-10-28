@@ -43,8 +43,13 @@ if (-not $pronto) {
 }
 
 # --- 2. criar a colecao, se ainda nao existir ------------------------------
-# API de collections, nao de cores. O Solr 10 sobe em modo cloud por padrao —
-# o modo autogerido saiu — e nele 'admin/cores?action=CREATE' responde 400.
+# API de collections, nao de cores. O Solr 10 sobe em modo SolrCloud por padrao,
+# e nele 'admin/cores?action=CREATE' responde 400.
+#
+# O que este comentario afirmava errado: que o modo autogerido "saiu" no Solr 10.
+# Ele nao saiu, virou opt-in via 'solr start --user-managed'. Isso importa porque
+# o 'solr-precreate' da imagem Docker passa justamente essa flag, e ai e a API
+# daqui que responde 400. Ver o comentario do compose.yaml.
 $existe = $false
 try {
     $lista = Invoke-RestMethod -Uri "$BaseUrl/admin/collections?action=LIST&wt=json" -TimeoutSec 15

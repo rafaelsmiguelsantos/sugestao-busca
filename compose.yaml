@@ -7,14 +7,21 @@
 # decisao de arquitetura tomada sobre premissa vencida.
 #
 #   docker compose up -d
-#   pwsh scripts/criar-colecao.ps1      # schema do Solr
-#   pwsh scripts/criar-tabelas.ps1      # tabelas do DynamoDB
+#   pwsh scripts/criar-colecao.ps1      # cria a colecao e aplica o schema
+#   pwsh scripts/semear-vocabulario.ps1 # vocabulario sintetico + catalogo
 #   docker compose down                 # mantem os volumes
 #   docker compose down -v              # descarta indice E tabelas
 #
+# As tabelas do DynamoDB nao precisam de script: TabelasDoDynamo as cria na
+# inicializacao (sugestao.dynamo.criar-tabelas, default true). ESTE COMENTARIO
+# TAMBEM JA ESTEVE ERRADO: ele mandava rodar um 'scripts/criar-tabelas.ps1' que
+# nunca existiu no repositorio.
+#
 # scripts/solr-local.ps1 continua subindo o mesmo Solr 10.0.0 a partir do zip, na
-# mesma porta e com a mesma colecao, para quem nao quiser container. O schema e
-# identico nos dois caminhos. Nao suba os dois ao mesmo tempo na porta 8983.
+# mesma porta e com a mesma colecao, para quem nao quiser container -- mas ele
+# NAO baixa nada: a instalacao tem de existir e ser apontada por SOLR_INSTALL.
+# O schema e identico nos dois caminhos, e os dois sobem em SolrCloud. Nao suba
+# os dois ao mesmo tempo na porta 8983.
 
 services:
   solr:
@@ -29,9 +36,17 @@ services:
       # O modulo de reordenacao (camada 4 do desenho) fica disponivel desde ja,
       # mesmo que as camadas 1 a 3 subam primeiro.
       SOLR_MODULES: ltr
-    command:
-      - solr-precreate
-      - sugestoes
+    # NAO usar 'solr-precreate'. Esse script da imagem termina com
+    # 'exec solr-fg --user-managed', ou seja ele FORCA o modo autogerido -- e
+    # nesse modo a API de colecoes responde 400 "Solr instance is not running
+    # in SolrCloud mode", que e a UNICA API que scripts/criar-colecao.ps1 fala.
+    # O caminho do container ficou quebrado desde que foi escrito, por isso.
+    #
+    # No Solr 10 'solr start' ja sobe em SolrCloud por padrao: a flag -c foi
+    # removida e standalone virou opt-in via --user-managed. 'solr-foreground'
+    # sem argumento e exatamente esse padrao. A colecao deixa de ser pre-criada
+    # e passa a ser criada pelo criar-colecao.ps1, que e o dono do schema.
+    command: ["solr-foreground"]
     volumes:
       - solr-data:/var/solr
     healthcheck:

@@ -10,10 +10,10 @@
 #   terminal e imprime a resposta formatada.
 #
 # ANTES DE COMECAR
-#   1. .\scripts\solr-local.ps1 start
+#   1. docker compose up -d            (ou .\scripts\solr-local.ps1 start)
 #   2. .\scripts\criar-colecao.ps1
 #   3. .\scripts\semear-vocabulario.ps1
-#   4. $env:JAVA_HOME='C:\Users\migue\tools\jdk-25'
+#   4. $env:JAVA_HOME='<caminho do seu JDK 25>'
 #      .\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
 #
 #   O perfil 'local' liga ?explicar=true e afrouxa os prazos de 18/8/30 ms para

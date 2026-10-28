@@ -21,13 +21,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Nada aqui tem caminho padrao: um default apontando para a maquina de quem
+# escreveu o script falha para todo mundo que clona, e falha reclamando de uma
+# pasta que o leitor nunca viu.
 if (-not $SolrHome) {
     if ($env:SOLR_INSTALL) { $SolrHome = $env:SOLR_INSTALL }
-    else { $SolrHome = 'C:\Users\migue\tools\solr-10.0.0' }
+    else {
+        throw "Nao sei onde o Solr esta instalado. Aponte -SolrHome ou a variavel SOLR_INSTALL para a pasta do solr-10.0.0. Ou use 'docker compose up -d', que dispensa instalar o Solr."
+    }
 }
 if (-not $JavaHome) {
-    if ($env:JAVA_25_HOME) { $JavaHome = $env:JAVA_25_HOME }
-    else { $JavaHome = 'C:\Users\migue\tools\jdk-25' }
+    if     ($env:JAVA_25_HOME) { $JavaHome = $env:JAVA_25_HOME }
+    elseif ($env:JAVA_HOME)    { $JavaHome = $env:JAVA_HOME }
+    else {
+        throw "Nao sei qual JDK usar. Aponte -JavaHome, ou defina JAVA_25_HOME ou JAVA_HOME."
+    }
 }
 
 $solr = Join-Path $SolrHome 'bin\solr.cmd'
