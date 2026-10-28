@@ -70,8 +70,95 @@ public record SugestaoProperties(
         /* Cache do perfil por sessao de digitacao. Ver PerfisComCache. */
         CacheDePerfil cacheDePerfil,
 
+        /* Perfil e log de eventos no DynamoDB. Ver PerfisNoDynamo. */
+        Dynamo dynamo,
+
         /* Limite de taxa na rota de digitacao. Ver LimitadorDeTaxa. */
         LimiteDeTaxa limiteDeTaxa) {
+
+    /**
+     * O registro de perfil e o log durável de eventos no DynamoDB.
+     *
+     * <p><strong>Desligado por padrão</strong>, pela regra que o projeto já aplica
+     * duas vezes: o default que viaja no repositório é o que funciona sem
+     * infraestrutura extra. Com {@code habilitado=false} os adaptadores em memória
+     * continuam atendendo as portas, e nada no domínio percebe.
+     *
+     * @param habilitado          troca os adaptadores em memória pelos do DynamoDB
+     * @param endpoint            vazio usa a resolução normal do SDK; para o
+     *                            DynamoDB Local, {@code http://localhost:8000}
+     * @param regiao              exigida pelo SDK mesmo contra o emulador
+     * @param tabelaDePerfis      os dois itens por cliente
+     * @param tabelaDeEventos     o log append-only
+     * @param criarTabelas        cria na inicialização, para desenvolvimento
+     * @param leituraConsistente  ver {@code PerfisNoDynamo.porCliente}
+     * @param retencaoDeEventosDias  TTL do log
+     * @param timeoutMs           prazo da chamada ao DynamoDB
+     */
+    public record Dynamo(
+            boolean habilitado,
+            String endpoint,
+            String regiao,
+            String tabelaDePerfis,
+            String tabelaDeEventos,
+            Boolean criarTabelas,
+            Boolean leituraConsistente,
+            int retencaoDeEventosDias,
+            long timeoutMs) {
+
+        /**
+         * O prazo do perfil é 8 ms. Um timeout de chamada MAIOR que ele seria
+         * ficção — o {@code aguardar} do caso de uso desiste em 8 ms e segue com
+         * a lista degradada, mas a thread continuaria presa esperando o DynamoDB
+         * até o timeout do SDK.
+         *
+         * <p>É exatamente o que o comentário do caso de uso diz: <em>"o que
+         * transforma o prazo em ficção são duas coisas juntas: o cancelamento com
+         * interrupção, e o timeout de requisição configurado no próprio cliente do
+         * adaptador"</em>. Este é o segundo.
+         */
+        private static final long TIMEOUT_MAXIMO_MS = 1_000;
+
+        public Dynamo {
+            endpoint = endpoint == null ? "" : endpoint.trim();
+            regiao = regiao == null || regiao.isBlank() ? "sa-east-1" : regiao.trim();
+            tabelaDePerfis = tabelaDePerfis == null || tabelaDePerfis.isBlank()
+                    ? "sugestao-perfis" : tabelaDePerfis.trim();
+            tabelaDeEventos = tabelaDeEventos == null || tabelaDeEventos.isBlank()
+                    ? "sugestao-eventos" : tabelaDeEventos.trim();
+
+            // Boolean e nao boolean, pela mesma razao da decisao 6: ausente tem de
+            // ser distinguivel de false. Quem liga o DynamoDB sem declarar
+            // criar-tabelas espera que elas existam, nao um ResourceNotFound.
+            criarTabelas = criarTabelas == null ? Boolean.TRUE : criarTabelas;
+            leituraConsistente = leituraConsistente == null ? Boolean.TRUE : leituraConsistente;
+
+            retencaoDeEventosDias = retencaoDeEventosDias <= 0 ? 90 : retencaoDeEventosDias;
+            timeoutMs = timeoutMs <= 0 ? 200 : timeoutMs;
+
+            if (timeoutMs > TIMEOUT_MAXIMO_MS) {
+                throw new IllegalArgumentException(
+                        "sugestao.dynamo.timeout-ms=" + timeoutMs + " passa do teto de "
+                                + TIMEOUT_MAXIMO_MS + " ms. O prazo do perfil e 8 ms: um"
+                                + " timeout grande nao atrasa a resposta, prende a thread"
+                                + " depois que a resposta ja saiu degradada.");
+            }
+        }
+
+        public static Dynamo padrao() {
+            return new Dynamo(false, "", "sa-east-1",
+                    "sugestao-perfis", "sugestao-eventos",
+                    Boolean.TRUE, Boolean.TRUE, 90, 200);
+        }
+
+        public boolean criaTabelas() {
+            return Boolean.TRUE.equals(criarTabelas);
+        }
+
+        public boolean leEmConsistenciaForte() {
+            return Boolean.TRUE.equals(leituraConsistente);
+        }
+    }
 
     /**
      * A tolerância a erro de digitação.

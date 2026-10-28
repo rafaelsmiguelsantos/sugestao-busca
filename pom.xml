@@ -29,8 +29,42 @@
 	<properties>
 		<java.version>25</java.version>
 		<solrj.version>10.0.0</solrj.version>
+		<awssdk.version>2.57.5</awssdk.version>
 	</properties>
 	<dependencies>
+		<!-- DynamoDB: o registro de perfil e o log durave de eventos.
+		     Apenas o modulo dynamodb, e com o cliente HTTP apache EXCLUIDO em
+		     favor do UrlConnectionHttpClient: o default do SDK traz Netty
+		     (async) ou Apache HttpClient, e nenhum dos dois paga por si aqui.
+		     Este servico faz um GetItem por requisicao, em thread virtual —
+		     uma conexao HTTP simples e bloqueante e o encaixe certo, e corta
+		     dezenas de megabytes de dependencia transitiva.
+
+		     Sem o SDK Enhanced de proposito. Ele mapeia classe para item por
+		     anotacao, e o Perfil nao e um item: sao DOIS itens com donos
+		     diferentes (ver PerfisNoDynamo). Esconder isso atras de um
+		     @DynamoDbBean reintroduziria o PutItem do registro inteiro, que e
+		     exatamente o apagamento que este desenho existe para impedir. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>dynamodb</artifactId>
+			<version>${awssdk.version}</version>
+			<exclusions>
+				<exclusion>
+					<groupId>software.amazon.awssdk</groupId>
+					<artifactId>netty-nio-client</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>software.amazon.awssdk</groupId>
+					<artifactId>apache-client</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>url-connection-client</artifactId>
+			<version>${awssdk.version}</version>
+		</dependency>
 		<!-- Cliente do Solr. Nao existe starter do Spring para Solr desde o Boot 2.4:
 		     o SolrJ entra como dependencia comum e o client vira um @Bean nosso. -->
 		<dependency>

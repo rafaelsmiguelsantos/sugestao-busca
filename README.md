@@ -16,7 +16,7 @@ motivo de cada ausência registrado.
 | **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 40 requisições em 8 pastas |
-| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 28 decisões, com o que foi **recusado** e por quê |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 29 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 | ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
@@ -75,7 +75,7 @@ entraria um job de janela deslizante. Os limites estão listados em
 | **Apache Solr** | 10.0.0 | os scripts baixam e sobem a partir do zip, sem admin |
 | **Maven** | — | via `mvnw`, baixado na primeira build |
 | **PowerShell** | 5.1 | os scripts são compatíveis com o que vem no Windows |
-| **Docker** | opcional | alternativa ao Solr do zip — ver [Solr em Docker](#solr-em-docker) |
+| **Docker** | opcional | para o **DynamoDB** (perfil durável) e, se quiser, o Solr em container |
 
 No Windows, a política de execução padrão é `Restricted` e nenhum `.ps1` roda.
 Uma vez só, em terminal normal, sem admin:
@@ -88,7 +88,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 baixado. Quem preferir não mudar a política roda cada um avulso com
 `powershell -ExecutionPolicy Bypass -File .\scripts\...`.
 
-### Cinco passos até a primeira resposta
+### Seis passos até a primeira resposta
 
 ```powershell
 # 1 · clonar
@@ -104,11 +104,14 @@ $env:SUGESTAO_SEGREDO = 'troque-isto-por-ao-menos-32-bytes-proprios'
 .\scripts\criar-colecao.ps1
 .\scripts\semear-vocabulario.ps1        # vocabulário sintético + catálogo
 
-# 4 · a aplicação, no perfil de demonstração
+# 4 · (opcional) DynamoDB, para o perfil NÃO morrer no restart
+docker compose up -d dynamodb      # a aplicação cria as tabelas ao subir
+
+# 5 · a aplicação, no perfil de demonstração
 $env:JAVA_HOME = '<caminho do seu JDK 25>'
 .\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
 
-# 5 · um token e a primeira chamada
+# 6 · um token e a primeira chamada
 $t = .\scripts\gerar-token.ps1 -Tipo cliente -ClienteId pf-pix-recusado -Silencioso
 curl.exe -s "http://localhost:8080/v1/sugestoes?q=consignad&explicar=true" `
   -H "Authorization: Bearer $t"
@@ -119,9 +122,20 @@ Saúde em <http://localhost:8080/actuator/health>, painel do Solr em
 `.\scripts\solr-local.ps1 stop`.
 
 > **Por que o perfil `local`.** Ele liga `?explicar=true`, o gatilho manual de
-> aprendizado e prazos folgados, e autoriza as origens CORS dos empacotadores de
-> front-end. O perfil padrão não liga nada disso — o default que viaja no
-> repositório é o seguro, e ligar é decisão de quem roda.
+> aprendizado e prazos folgados, autoriza as origens CORS dos empacotadores de
+> front-end e **liga o DynamoDB**. O perfil padrão não liga nada disso — o default
+> que viaja no repositório é o seguro, e ligar é decisão de quem roda.
+
+> **O passo 4 é opcional, e o que muda sem ele.** Sem o DynamoDB a aplicação sobe
+> igual, com perfil, fila e agregados em memória — e **reiniciar apaga o que foi
+> aprendido**. Com ele, afinidade, tendência, fadiga e o log de eventos
+> sobrevivem; medido, o aprendizado volta byte a byte depois do restart. Para
+> rodar sem o container mesmo no perfil `local`:
+> `--sugestao.dynamo.habilitado=false`.
+>
+> O custo também está medido: a leitura do perfil sai de um `HashMap` para rede, e
+> com o orçamento de produção de 8 ms **48 % das listas saem degradadas** — ou
+> 5 % com o cache de perfil ligado. Os números e o porquê estão na decisão 29.
 
 > **Se a busca devolver 500, rode `.\mvnw clean` antes de acusar o código.** A
 > rota de busca não tem caminho de erro — um 500 ali significa quase sempre
@@ -255,7 +269,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 | documento | o que responde |
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
-| [`docs/decisoes.md`](docs/decisoes.md) | 28 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/decisoes.md`](docs/decisoes.md) | 29 decisões de desenho, com o que foi **recusado** e por quê |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
@@ -385,7 +399,7 @@ relativo, ordem monótona exceto a linha de evento, `melhorOferta` apontando par
 um item que de fato é oferta, cabeçalhos de limite de taxa presentes. Um front
 escrito contra esta API pode confiar nelas sem ler o código do servidor.
 
-> **Por que isso não é mais um teste JUnit.** Os 200 testes provam o domínio e o
+> **Por que isso não é mais um teste JUnit.** Os 212 testes provam o domínio e o
 > caso de uso, e nenhum deles passa por HTTP de verdade — é no HTTP que mora o
 > que o front enxerga. O defeito de charset deste repositório é a prova: **todo
 > teste JUnit passava, e todo termo acentuado chegava ilegível ao cliente.**
@@ -1431,7 +1445,7 @@ alcança, para isso parar de ser descoberta manual.
 
 ```powershell
 $env:JAVA_HOME = '<seu JDK 25>'
-.\mvnw test                                  # 200 testes
+.\mvnw test                                  # 212 testes
 .\scripts\cacar-flaky.ps1 -Rodadas 10        # caça teste instável sob carga
 .\requisicoes\sondar.ps1                     # 55 sondas adversariais
 .\scripts\avaliar-ranking.ps1                # NDCG@5 — portão de regressão de ordem

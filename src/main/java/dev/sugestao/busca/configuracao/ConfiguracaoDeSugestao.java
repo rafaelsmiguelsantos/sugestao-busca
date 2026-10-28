@@ -52,11 +52,24 @@ import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
+import dev.sugestao.busca.adaptador.saida.dynamo.AgregadosComLogDuravel;
+import dev.sugestao.busca.adaptador.saida.dynamo.PerfisNoDynamo;
+import dev.sugestao.busca.adaptador.saida.dynamo.TabelasDoDynamo;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
@@ -177,6 +190,159 @@ public class ConfiguracaoDeSugestao {
         return new PerfisEmMemoria(PerfisDaDemonstracao.iniciais());
     }
 
+    // -----------------------------------------------------------------------
+    // DynamoDB. Opcional, e quando ligado troca os adaptadores de memória sem
+    // que o domínio saiba — nenhuma linha dele mudou para isto existir.
+    // -----------------------------------------------------------------------
+
+    /**
+     * O cliente do DynamoDB, com <strong>timeout próprio</strong>.
+     *
+     * <p>Esse timeout é a parte que não dá para esquecer, e o caso de uso já
+     * explicava por quê: <em>"o que transforma o prazo em ficção são duas coisas
+     * juntas: o cancelamento com interrupção em `aguardar`, e o timeout de
+     * requisição configurado no próprio cliente HTTP do adaptador. Sem o segundo,
+     * uma dependência surda à interrupção seguraria a resposta depois do prazo
+     * vencido."</em> O {@code aguardar} desiste em 8 ms; sem o timeout aqui, a
+     * thread virtual continuaria presa até o default do SDK, que é de segundos.
+     *
+     * <p><strong>Nova tentativa desligada.</strong> O SDK tenta três vezes por
+     * padrão. Num typeahead isso é a pior configuração possível: a próxima tecla
+     * já vem a caminho, então uma segunda tentativa serve uma resposta que ninguém
+     * mais quer, gastando a conexão que a tecla seguinte precisa. É a mesma regra
+     * que vale para o Solr em todo o projeto — nenhuma etapa tem nova tentativa.
+     *
+     * <p>Credencial estática e falsa quando há {@code endpoint} configurado: o
+     * DynamoDB Local aceita qualquer uma, mas o SDK <em>exige</em> que exista uma
+     * para assinar. Sem isto a cadeia de credenciais vai procurar perfil, variável
+     * de ambiente e metadata de instância — e falha com uma mensagem sobre IAM que
+     * não tem nada a ver com o problema.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "sugestao.dynamo", name = "habilitado", havingValue = "true")
+    public DynamoDbClient dynamoDbClient(SugestaoProperties props) {
+        var config = props.dynamo() == null
+                ? SugestaoProperties.Dynamo.padrao()
+                : props.dynamo();
+
+        return cliente(config, Duration.ofMillis(config.timeoutMs()));
+    }
+
+    /**
+     * Um cliente com prazo próprio, e o SDK tem <strong>três camadas</strong> de
+     * prazo que não são a mesma coisa.
+     *
+     * <p>Isto custou duas tentativas, e vale registrar porque o sintoma aponta
+     * para o lugar errado:
+     *
+     * <ol>
+     *   <li>{@code apiCallTimeout} — o orçamento da chamada inteira, contado pelo
+     *       temporizador do SDK. <em>Sobreponível por requisição.</em></li>
+     *   <li>{@code apiCallAttemptTimeout} — o de cada tentativa.
+     *       <em>Sobreponível por requisição.</em></li>
+     *   <li>{@code connectionTimeout} e {@code socketTimeout} do cliente HTTP —
+     *       <strong>fixados na construção e NÃO sobreponíveis por requisição.</strong></li>
+     * </ol>
+     *
+     * <p>Com 200 ms nas três, a criação de tabela falhava com
+     * {@code ApiCallTimeoutException}; sobrepondo as duas primeiras por requisição,
+     * passou a falhar com {@code SdkClientException: Read timed out} — a terceira
+     * camada, que o override não alcança. E só na <em>primeira</em> chamada, porque
+     * ela paga resolução de endpoint e carga de classe.
+     *
+     * <p>Daí dois clientes em vez de um afrouxado: <strong>prazo pertence a uma
+     * carga de trabalho, não a um cliente.</strong> O do caminho de leitura tem de
+     * ser apertado porque o orçamento do perfil é 8 ms; o da inicialização não tem
+     * ninguém digitando do outro lado. Afrouxar um só para caber o outro teria
+     * quebrado a única coisa que o prazo protege.
+     */
+    private static DynamoDbClient cliente(SugestaoProperties.Dynamo config, Duration prazo) {
+        var construtor = DynamoDbClient.builder()
+                .region(Region.of(config.regiao()))
+                .httpClient(UrlConnectionHttpClient.builder()
+                        .connectionTimeout(prazo)
+                        .socketTimeout(prazo)
+                        .build())
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallTimeout(prazo)
+                        .apiCallAttemptTimeout(prazo)
+                        // O SDK tenta tres vezes por padrao. Num typeahead e a pior
+                        // configuracao possivel: a proxima tecla ja vem a caminho,
+                        // entao a segunda tentativa serve uma resposta que ninguem
+                        // mais quer, gastando a conexao que a tecla seguinte precisa.
+                        // Nenhuma etapa deste projeto tem nova tentativa.
+                        .retryStrategy(AwsRetryStrategy.doNotRetry())
+                        .build());
+
+        if (!config.endpoint().isBlank()) {
+            // Credencial estatica e falsa: o DynamoDB Local aceita qualquer uma,
+            // mas o SDK EXIGE que exista uma para assinar. Sem isto a cadeia de
+            // credenciais procura perfil, variavel de ambiente e metadata de
+            // instancia, e falha com uma mensagem sobre IAM que nao tem nada a ver
+            // com o problema.
+            construtor
+                    .endpointOverride(URI.create(config.endpoint()))
+                    .credentialsProvider(StaticCredentialsProvider.create(
+                            AwsBasicCredentials.create("local", "local")));
+        }
+
+        return construtor.build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "sugestao.dynamo", name = "habilitado", havingValue = "true")
+    public PerfisNoDynamo perfisNoDynamo(DynamoDbClient dynamo, SugestaoProperties props) {
+        var config = props.dynamo();
+
+        // Cliente de inicializacao, fechado ao sair. Ver cliente(...) para o
+        // motivo de ele existir separado.
+        try (var setup = cliente(config, Duration.ofSeconds(20))) {
+            if (config.criaTabelas()) {
+                TabelasDoDynamo.criar(setup, config.tabelaDePerfis(), config.tabelaDeEventos());
+            }
+
+            // Os fatos dos oito perfis de demonstração. Sem isto, subir com o
+            // DynamoDB daria oito clientes sem elegibilidade e sem situação de
+            // conta: a Peneira não teria o que vetar e metade da demonstração
+            // deixaria de existir.
+            new PerfisNoDynamo(setup, config.tabelaDePerfis(), true)
+                    .semearDemonstracao(PerfisDaDemonstracao.iniciais());
+        }
+
+        return new PerfisNoDynamo(
+                dynamo, config.tabelaDePerfis(), config.leEmConsistenciaForte());
+    }
+
+    /**
+     * A porta de <em>escrita</em> de perfil.
+     *
+     * <p>Existe por causa da ambiguidade que o DynamoDB introduz: dois beans
+     * passam a implementar {@code EscritorDePerfil}, e o Spring não teria como
+     * escolher.
+     *
+     * <p><strong>A referência de método não é estilo, é o que faz isto
+     * funcionar.</strong> Devolver o objeto escolhido direto registraria um bean
+     * cujo tipo real também implementa {@code RepositorioDePerfil} — e aí
+     * existiriam <em>dois</em> beans primários para a porta de leitura, com o
+     * contexto recusando subir. Já aconteceu aqui, e a mensagem do Spring é
+     * clara: {@code more than one 'primary' bean found}.
+     *
+     * <p>{@code escolhido::atualizar} produz um objeto que implementa
+     * <em>somente</em> a porta de escrita, porque {@code EscritorDePerfil} tem um
+     * método só. A separação por direção, que até agora era verificada pelo
+     * compilador nos casos de uso, passa a ser verificada também pelo contêiner:
+     * este bean é <strong>incapaz</strong> de ser injetado onde se espera leitura.
+     */
+    @Bean
+    @Primary
+    public EscritorDePerfil escritorDePerfil(
+            PerfisEmMemoria emMemoria, ObjectProvider<PerfisNoDynamo> noDynamo) {
+
+        var doDynamo = noDynamo.getIfAvailable();
+        EscritorDePerfil escolhido = doDynamo != null ? doDynamo : emMemoria;
+        return escolhido::atualizar;
+    }
+
     /**
      * A porta de <em>leitura</em> de perfil, possivelmente com cache.
      *
@@ -201,7 +367,20 @@ public class ConfiguracaoDeSugestao {
     @Bean
     @Primary
     public RepositorioDePerfil repositorioDePerfil(
-            PerfisEmMemoria base, SugestaoProperties props, MeterRegistry registro) {
+            PerfisEmMemoria emMemoria,
+            ObjectProvider<PerfisNoDynamo> noDynamo,
+            SugestaoProperties props,
+            MeterRegistry registro) {
+
+        // O adaptador de base: DynamoDB quando ligado, memória quando não. O
+        // cache decora qualquer um dos dois sem saber qual é — que é o ponto de
+        // ambos implementarem a mesma porta.
+        //
+        // E é aqui que a troca fica visível: esta linha é toda a diferença entre
+        // um perfil que morre no restart e um que não morre. Nem o caso de uso,
+        // nem o domínio, nem um único teste do domínio muda por causa dela.
+        var doDynamo = noDynamo.getIfAvailable();
+        RepositorioDePerfil base = doDynamo != null ? doDynamo : emMemoria;
 
         var config = props.cacheDePerfil() == null
                 ? SugestaoProperties.CacheDePerfil.padrao()
@@ -365,10 +544,49 @@ public class ConfiguracaoDeSugestao {
      * em vez de contorná-lo.
      */
     @Bean
-    public RepositorioDeAgregados repositorioDeAgregados(SugestaoProperties props) {
+    public RepositorioDeAgregados repositorioDeAgregados(
+            SugestaoProperties props, ObjectProvider<DynamoDbClient> dynamo) {
+
         var agregados = new AgregadosEmMemoria(props.aprendizado().tetoDeEventos());
         agregados.acumular(EventosDaDemonstracao.iniciais());
-        return agregados;
+
+        var cliente = dynamo.getIfAvailable();
+        if (cliente == null) {
+            return agregados;
+        }
+
+        // O log durável, como DECORADOR — o quinto a entrar assim, depois do
+        // disjuntor, do limite de taxa, da medição e do cache. Nenhuma porta
+        // nova, nenhum parâmetro novo no caso de uso de aprendizado, nenhuma
+        // linha de domínio.
+        //
+        // A ordem importa: a semeadura da demonstração acontece ACIMA, no
+        // adaptador cru. Semear depois de decorar gravaria os eventos de
+        // demonstração no log durável a cada inicialização, e em dez restarts o
+        // log teria dez cópias do mesmo histórico inventado — poluindo
+        // justamente o dado que este decorador existe para acumular.
+        var comLog = new AgregadosComLogDuravel(
+                agregados,
+                cliente,
+                props.dynamo().tabelaDeEventos(),
+                Duration.ofDays(props.dynamo().retencaoDeEventosDias()));
+
+        // E A RESTAURAÇÃO, que é o que faz a persistência entregar o que promete.
+        //
+        // Sem esta linha o perfil era gravado e perdido: ao subir, a rodada de
+        // agregação recomputava-o a partir da janela em memória — que voltava com
+        // apenas os eventos de demonstração — e sobrescrevia o aprendizado com
+        // menos informação do que a view já tinha. Medido:
+        //
+        //     antes do restart   CDB 3.217298   LCI 2.274373
+        //     depois do restart  CDB 3.082429   LCI 2.179031   <- a linha de base
+        //
+        // A janela restaurada é a do VOCABULÁRIO, a maior das duas, porque ela
+        // contém a do comportamento. Restaurar só 24 h deixaria a afinidade — que
+        // tem janela de 90 dias e meia-vida de 7 — nascer truncada a cada restart.
+        comLog.restaurarDoLog(Duration.ofDays(props.aprendizado().janelaVocabularioDias()));
+
+        return comLog;
     }
 
     @Bean

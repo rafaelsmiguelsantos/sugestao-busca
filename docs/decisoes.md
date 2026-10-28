@@ -1396,3 +1396,189 @@ isto não se deriva: o `POST` exige o identificador no corpo.
 latencia` (p50 12 ms, p99 26 ms, medidos de fora com o cliente HTTP do
 PowerShell numa thread) servem para comparar mudanças entre si, não para afirmar
 que o orçamento de produção fecha.
+
+---
+
+## 29. O DynamoDB entra, e o que ele mediu vale mais que o que ele guarda
+
+O perfil, a fila e os agregados viviam em memória, e isso estava declarado como
+mentira desde o começo: `PerfisEmMemoria`, `FilaEmMemoria`,
+`AgregadosEmMemoria` — as classes carregam a mentira no nome, de proposito, para
+ninguem ler o codigo e esquecer. Reiniciar apagava tudo.
+
+O javadoc da porta de escrita ja dizia para onde isso ia: *"Escreve o perfil — o
+DynamoDB do desenho."* Esta decisao cumpre a frase.
+
+### O que entrou, e o que ficou de fora
+
+| porta | adaptador novo | por que |
+|---|---|---|
+| `RepositorioDePerfil` + `EscritorDePerfil` | `PerfisNoDynamo` | duas tabelas, dois itens por cliente |
+| `RepositorioDeAgregados` | `AgregadosComLogDuravel` | **decorador**, o quinto do projeto |
+| `FilaDeEventos` | **nenhum** | ver abaixo |
+
+A fila ficou fora de propósito. `publicar` / `consumir` / `pendentes` é semantica
+de fila, e DynamoDB como fila e anti-padrao: acaba-se varrendo ou mantendo um
+GSI, e reinventando visibilidade e *claim* a mao. O desenho continua apontando
+para SQS ou Kinesis. **Nao forcar as tres portas no mesmo banco so porque ele
+esta disponivel** foi a decisao mais barata desta lista.
+
+### A ordem foi eventos primeiro, e isso nao e detalhe
+
+O perfil e uma **view materializada**: a rodada de 15 s o monta a partir dos
+eventos. Persistir so a view e perder a fonte e persistir um cache — sobrevive ao
+restart, a demonstracao fica boa, e continua sem haver como recalcular com pesos
+diferentes, treinar modelo nenhum, ou explicar como aquela afinidade virou 0,47.
+
+Isso nao e teoria. Foi medido, porque eu implementei na ordem errada primeiro:
+
+```
+antes do restart   CDB 3.217298   LCI 2.274373   (aprendido)
+depois do restart  CDB 3.082429   LCI 2.179031   (a linha de base)
+```
+
+O perfil **estava gravado**. Ao subir, a agregacao recomputou-o a partir da
+janela em memoria — que voltou contendo apenas os eventos de demonstracao — e
+sobrescreveu o aprendizado com menos informacao do que a view ja tinha. O
+conserto nao foi impedir a agregacao de sobrescrever; foi devolver a ela a fonte
+inteira, com `restaurarDoLog` na inicializacao.
+
+### O perfil sao DOIS itens, e um `PutItem` seria um defeito
+
+O `Perfil` parece um registro so e sao dois dominios de propriedade. O codigo em
+memoria ja sabia — `PerfisEmMemoria.mesclar` preserva quatro campos e o javadoc
+diz por que: *"Sobrescrever tudo seria o bug silencioso obvio aqui: uma busca
+qualquer apagaria a inadimplencia do cliente e o credito novo voltaria a ser
+oferecido na tecla seguinte."*
+
+| `SK = COMPORTAMENTO` | `SK = CADASTRO` |
+|---|---|
+| historico, afinidade por jornada e por produto, tendencia, fadiga | gatilhos, produtos contratados, elegibilidades, situacao da conta |
+| derivado do **nosso** log — reconstruivel | fato de **outro** sistema — apenas cacheado |
+| escreve a agregacao de busca | escrevem os sistemas de origem |
+
+Em memoria o `merge` e atomico dentro de uma JVM. Com dois produtores reais,
+gravar o item inteiro e *lost update*, e o que se perde e a inadimplencia.
+Separados na mesma particao, cada escritor fica **fisicamente incapaz** de
+apagar o campo do outro — mesmo princípio do construtor do `Substituto` recusar
+restricao em vez de confiar na revisao.
+
+Por isso **sem o SDK Enhanced**: ele mapeia classe para item por anotacao, e
+esconder dois donos atras de um `@DynamoDbBean` reintroduziria exatamente o
+`PutItem` que este desenho existe para impedir.
+
+E o `gatilhosAtivos` virou `SET #g = if_not_exists(#g, :g)`, que reproduz uma
+semantica peculiar e deliberada da memoria: `doZero` pega o gatilho da agregacao
+na primeira vez e `mesclar` o preserva depois. Numa JVM so era inofensivo; com
+dois produtores passa a ser pergunta de desenho — *quem e o dono do gatilho?* — e
+a resposta do desenho e: os sistemas de origem.
+
+### A medicao que justifica o cache de perfil, que estava desligado
+
+Esta e a parte que eu nao esperava. A decisao 27 deixou o cache desligado porque
+o ganho era "argumento de papel": o perfil era um `ConcurrentHashMap` e a leitura
+ja custava quase zero. Com a porta falando rede, o argumento virou numero.
+
+Sessenta buscas, orcamento de **producao** (perfil 8 ms):
+
+| configuracao | lista degradada |
+|---|---|
+| DynamoDB, **sem** cache | 29 de 60 — **48,3 %** |
+| DynamoDB, **com** cache | 3 de 60 — **5 %** |
+
+Cache: 57 acertos, 3 erros — e os tres erros sao exatamente as tres degradacoes.
+**O cache passou a valer dez vezes.** Ele continua desligado por padrao, porque
+continua quebrando *read-after-write* em `verificar-comportamento.ps1`; o que
+mudou e que agora existe um numero do outro lado da balanca, e o conserto da
+chave por sessao de digitacao deixou de ser melhoria para virar necessidade.
+
+Latencia do lado servidor, com os prazos folgados do perfil `local`: p50 de
+**12,6 ms** contra os 8–10 ms da memoria. O custo e real e esta medido.
+
+### Tres camadas de prazo no SDK, e so duas sao sobreponiveis
+
+Isto custou duas tentativas de subir a aplicacao:
+
+1. `apiCallTimeout` — o orcamento da chamada inteira. **Sobreponivel por requisicao.**
+2. `apiCallAttemptTimeout` — o de cada tentativa. **Sobreponivel.**
+3. `connectionTimeout` e `socketTimeout` do cliente HTTP — **fixados na
+   construcao e NAO sobreponiveis.**
+
+Com 200 ms nas tres, `CreateTable` falhava com `ApiCallTimeoutException`.
+Sobrepondo as duas primeiras, passou a falhar com `SdkClientException: Read timed
+out` — a terceira camada, que o override nao alcanca. E so na **primeira**
+chamada, que paga resolucao de endpoint e carga de classe.
+
+Dai **dois clientes** em vez de um afrouxado: **prazo pertence a uma carga de
+trabalho, nao a um cliente.** O da leitura tem de ser apertado porque o orcamento
+e 8 ms; o da inicializacao nao tem ninguem digitando do outro lado. Afrouxar um
+so para caber o outro teria quebrado a unica coisa que o prazo protege — e e
+exatamente o que o caso de uso avisava: *"o que transforma o prazo em ficcao sao
+duas coisas juntas: o cancelamento com interrupcao, e o timeout de requisicao
+configurado no proprio cliente do adaptador."*
+
+Nova tentativa fica **desligada**. O SDK tenta tres vezes por padrao, e num
+typeahead e a pior configuracao possivel: a proxima tecla ja vem a caminho, entao
+a segunda tentativa serve uma resposta que ninguem mais quer, gastando a conexao
+que a tecla seguinte precisa.
+
+### Auditoria: dois campos de versao, nao uma tabela de scores
+
+A ideia de gravar score e rank "para auditoria" foi **recusada**. Um score
+guardado e um numero que ninguem pode verificar depois. O que torna um ranking
+auditavel e **reprodutibilidade**: o prefixo, um retrato dos insumos do perfil, a
+versao dos pesos e a versao do indice. Com esses quatro recalcula-se e confere-se;
+sem eles, o score salvo e uma afirmacao sobre si mesma.
+
+E num banco a pergunta do regulador nao e "qual era o score" — e *"por que esta
+oferta foi mostrada a esta pessoa"*. A **ordem** e o fato; o score e detalhe. O
+evento de impressao ja carrega `termosExibidos` inteiro e `posicao`; faltavam
+`versaoDosPesos` e `versaoDoCorpus`, e dois campos custam menos e provam mais
+que uma tabela.
+
+Nao se grava o rastro por requisicao: em typeahead seria uma escrita por tecla. O
+rastro acompanha a **impressao**, que so acontece quando a pessoa de fato viu a
+lista.
+
+### A prova de que a troca foi neutra
+
+| verificacao | resultado |
+|---|---|
+| suite | **212 testes, 0 falhas** — e nenhum teste existente alterado |
+| `verificar-comportamento.ps1` | todas passam, relevancias identicas (2.179031, ganho 1.0438x) |
+| portao de NDCG | **@5 = 0,9116 · delta 0,0000**, consulta por consulta |
+| newman consumo | 160 asserçoes, 0 falhas |
+| restart | aprendizado preservado byte a byte |
+
+Os 200 testes continuaram passando **sem um arquivo de teste tocado**; os 12
+novos sao do mapeamento. Se isso nao tivesse acontecido, a porta estava vazando —
+e ai a descoberta valeria mais que a persistencia.
+
+### O que o DynamoDB Local esconde, e esta declarado
+
+**Ele responde de forma efetivamente consistente.** E um processo so, sem
+replicacao, mesmo quando pedimos leitura eventual. Entao
+`verificar-comportamento.ps1` passar aqui **nao prova** que passaria contra o
+DynamoDB de verdade com leitura eventual — que e metade do custo em RCU e o que
+se usaria em producao. Por isso o default e `leitura-consistente=true`: o seguro
+em vez do barato, com o limite escrito.
+
+Tambem nao ha estrangulamento, nem cauda de latencia real, nem IAM. **Aprende-se
+o modelo de dados, nao a operacao.**
+
+### Duas dividas declaradas
+
+**O `Scan` da restauracao.** A chave de particao e `CLIENTE#<id>`, que responde
+bem a pergunta do caminho de leitura — *"os eventos deste cliente"*. Ela nao
+responde a pergunta da restauracao: *"os eventos de todos os clientes na ultima
+janela"*. Para essa, so resta varrer. Funciona num log de demonstracao e nao
+funciona em producao. As duas saidas, em ordem de preferencia: a agregacao deixar
+de ler tabela e passar a consumir um fluxo, que e o desenho declarado; ou um
+indice secundario com chave de tempo em cestos.
+
+**A limpeza de perfil mudou, e `avaliacao/README.md` mentia.** Com o perfil em
+memoria, reiniciar a aplicacao zerava tudo — e era essa a receita documentada
+para devolver o indice e os perfis a um estado comparavel antes de rodar o portao
+de NDCG. Com o DynamoDB ligado, **reiniciar nao limpa mais nada**: a poluicao de
+teste persiste junto com o aprendizado. A receita agora e
+`docker compose down dynamodb -v`, e o arquivo foi corrigido.

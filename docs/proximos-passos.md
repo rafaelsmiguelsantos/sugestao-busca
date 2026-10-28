@@ -11,12 +11,13 @@
 
 | | |
 |---|---|
-| **feito e verificado** | busca com perfil, cadastro por jornada, caminho de escrita, autenticação, resiliência, tolerância a erro de digitação, três sinais de comportamento, medição de qualidade, limite de taxa, linha substituta, **avaliação de ordem (NDCG)**, cache de perfil por sessão |
-| **medido** | 530–680 req/s · p50 8–10 ms · p99 ~30 ms · 200 testes · 220 asserções de contrato · 55 sondas sem achados · **NDCG@5 de 0,9116 em 32 consultas** |
-| **em memória, de propósito** | fila de eventos, agregação, perfil |
+| **feito e verificado** | busca com perfil, cadastro por jornada, caminho de escrita, autenticação, resiliência, tolerância a erro de digitação, três sinais de comportamento, medição de qualidade, limite de taxa, linha substituta, **avaliação de ordem (NDCG)**, cache de perfil por sessão, **perfil e log de eventos no DynamoDB** |
+| **medido** | 530–680 req/s · p50 8–10 ms (12,6 ms com DynamoDB) · 212 testes · 220 asserções de contrato · 55 sondas sem achados · **NDCG@5 de 0,9116 em 32 consultas** |
+| **em memória, de propósito** | fila de eventos, agregação em janela |
 | **não existe** | aprendizado de máquina |
 
-A última linha é uma **decisão**, não uma lacuna — e o porquê está no passo 0.
+A última linha é uma **decisão**, não uma lacuna — e o porquê está no passo 0,
+que agora está **meio feito**.
 
 > **O passo 4 saiu de ordem, e de propósito.** Ele era "lista de julgamento por
 > LLM" e estava depois dos embeddings. A infraestrutura dele foi construída
@@ -26,27 +27,43 @@ A última linha é uma **decisão**, não uma lacuna — e o porquê está no pa
 
 ---
 
-## 0 · Evento durável
+## 0 · Evento durável — **meio feito**
 
 **O bloqueio real, e ele vem antes de tudo.**
 
-Hoje o caminho é evento → `ConcurrentLinkedQueue` → agregado em memória → perfil em
-`ConcurrentHashMap`. **Reiniciar a aplicação apaga tudo.** Qualquer modelo treinado
-hoje usa o que aconteceu desde a última vez que o serviço subiu.
+O caminho era evento → `ConcurrentLinkedQueue` → agregado em memória → perfil em
+`ConcurrentHashMap`, e **reiniciar a aplicação apagava tudo**. Qualquer modelo
+treinado usava o que aconteceu desde a última vez que o serviço subiu.
 
-Não precisa de Kafka para destravar. Um adaptador que escreve os eventos em
-**Parquet**, lido com **DuckDB** do lado de análise, resolve para POC: embutido,
-zero operação, lê Parquet direto, e é o que o mundo de dados usa nesse tamanho. É
-mais um adaptador atrás da `FilaDeEventos` que já existe — a arquitetura não muda.
+### O que ficou feito (decisão 29)
 
-**Em produção isso não serve.** Com 60M buscas/dia são ~150M eventos/dia, e
-DuckDB não é o lugar: é Kinesis ou MSK → S3 → agregação em streaming. O desenho
-original já dizia MSK; o ponto do passo 0 é que a **porta** fique pronta para
-trocar.
+Duas tabelas no **DynamoDB**: `sugestao-eventos`, append-only com TTL de 90 dias,
+e `sugestao-perfis`, com o perfil em **dois itens** por dono. O log é restaurado
+na inicialização, então o aprendizado volta byte a byte — medido.
 
-> **Por que é o passo 0 e não o 1:** ele não entrega nada visível. Entrega a
-> condição de possibilidade de todos os outros. Pular é construir sobre dado que
-> evapora.
+E a ordem importou: implementar o perfil primeiro **não funcionou**, porque o
+perfil é uma view materializada e a agregação o recomputava a partir de uma janela
+vazia, sobrescrevendo o que estava gravado. *Persistir a view sem a fonte é
+persistir um cache*, e isso deixou de ser argumento e passou a ser medição.
+
+### O que falta, e é o que importa para ML
+
+**A fila continua em memória**, de propósito: `publicar`/`consumir` é semântica de
+fila e DynamoDB como fila é anti-padrão. E a **agregação continua lendo a janela
+em memória**, recomputando-a inteira a cada rodada — funciona em 200 mil eventos e
+não funciona em 150 milhões por dia.
+
+A restauração usa `Scan`, que é dívida declarada: a chave de partição responde
+*"os eventos deste cliente"* e não *"os eventos de todos na última janela"*.
+
+**Em produção o desenho não muda:** Kinesis ou MSK → S3 → agregação em streaming.
+O que o DynamoDB entregou foi o dado parando de evaporar e a **porta provada** —
+a troca custou uma classe nova e um `@Bean`, com zero linha de domínio e zero
+teste existente alterado.
+
+> **Por que ainda não é "feito":** um log que só a própria aplicação lê, por
+> `Scan`, numa tabela que não tem índice de tempo, destrava a demonstração e não
+> destrava o treinamento. O passo 0 acaba quando a agregação consumir um fluxo.
 
 ---
 

@@ -1,14 +1,20 @@
-# Solr 10 para o ambiente de desenvolvimento da camada de sugestao.
+# A infraestrutura de desenvolvimento da camada de sugestao: Solr e DynamoDB.
 #
-# Exige um runtime de container (Docker Desktop, Rancher ou Podman). Nesta maquina
-# nenhum esta instalado e o WSL tambem nao — veja README.md, secao "Solr em Docker".
-# Enquanto isso, scripts/solr-local.ps1 sobe o mesmo Solr 10.0.0 a partir do zip,
-# na mesma porta e com a mesma colecao. O schema e identico nos dois caminhos.
+# ESTE COMENTARIO JA ESTEVE ERRADO. Ele afirmava que nenhum runtime de container
+# existia nesta maquina. Passou a existir (Docker Desktop, instalado POR USUARIO
+# em %LOCALAPPDATA%\Programs\DockerDesktop, fora do PATH) e o comentario ficou
+# para tras por dois dias — o tipo de defeito de documentacao que custa uma
+# decisao de arquitetura tomada sobre premissa vencida.
 #
 #   docker compose up -d
-#   pwsh scripts/criar-colecao.ps1
-#   docker compose down          # mantem o volume
-#   docker compose down -v       # descarta o indice
+#   pwsh scripts/criar-colecao.ps1      # schema do Solr
+#   pwsh scripts/criar-tabelas.ps1      # tabelas do DynamoDB
+#   docker compose down                 # mantem os volumes
+#   docker compose down -v              # descarta indice E tabelas
+#
+# scripts/solr-local.ps1 continua subindo o mesmo Solr 10.0.0 a partir do zip, na
+# mesma porta e com a mesma colecao, para quem nao quiser container. O schema e
+# identico nos dois caminhos. Nao suba os dois ao mesmo tempo na porta 8983.
 
 services:
   solr:
@@ -36,5 +42,36 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  dynamodb:
+    image: amazon/dynamodb-local:3.0.0
+    container_name: sugestao-dynamodb
+    ports:
+      # So localhost, pelo mesmo motivo do Solr.
+      - "127.0.0.1:8000:8000"
+    # -sharedDb poe tudo num arquivo so, em vez de um banco por par
+    # (credencial, regiao). Sem isso, o token de dev e o script de criacao de
+    # tabela enxergam BANCOS DIFERENTES, e o sintoma e
+    # "ResourceNotFoundException" numa tabela que voce acabou de criar.
+    #
+    # -dbPath grava em disco. O default do dynamodb-local e EM MEMORIA, que
+    # reintroduziria exatamente o problema que este servico existe para
+    # resolver — e de forma silenciosa, porque tudo funciona ate o restart.
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/home/dynamodblocal/data"]
+    working_dir: /home/dynamodblocal
+    user: root
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      # A imagem nao tem curl. Este endpoint responde 400 a um GET sem
+      # assinatura, e 400 ja prova que ha alguem escutando e falando o
+      # protocolo — e o que um healthcheck precisa saber.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8000 && echo ok >&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   solr-data:
+  dynamodb-data:

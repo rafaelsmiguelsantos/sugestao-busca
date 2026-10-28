@@ -138,11 +138,22 @@ corpus : 99 docs [acao=20 consulta=55 entidade=6 oferta=18]
 | o que sujou | como limpar |
 |---|---|
 | ofertas de teste no índice | `.\scripts\limpar-ofertas-de-teste.ps1 -Confirmar` |
-| histórico e afinidade nos perfis | **reiniciar a aplicação** — o perfil é em memória |
+| perfis, com `sugestao.dynamo.habilitado=false` | **reiniciar a aplicação** — o perfil é em memória |
+| perfis, com o **DynamoDB ligado** | `docker compose down dynamodb -v` e subir de novo |
 
-O perfil não aparece na impressão digital, e isso é uma limitação declarada: ele
-é em memória e não tem como ser lido de fora sem `?explicar=true` por cliente.
-Reiniciar resolve, e o aviso do script diz isso.
+> **Esta tabela já esteve errada, e vale saber por quê.** Ela dizia apenas
+> "reiniciar a aplicação", o que era verdade enquanto o perfil era um
+> `ConcurrentHashMap`. Com o DynamoDB ligado, **reiniciar não limpa mais nada**:
+> a poluição de teste passou a sobreviver junto com o aprendizado, que é
+> precisamente o que a persistência existe para fazer. O `-v` é o que descarta o
+> volume; sem ele o `down` preserva as tabelas.
+>
+> É o custo que ninguém menciona ao defender durabilidade: **o estado sujo também
+> fica durável.** A receita de limpeza passa a fazer parte do procedimento de
+> medição, em vez de ser um efeito colateral gratuito do restart.
+
+O perfil não aparece na impressão digital, e isso é uma limitação declarada: não
+há como lê-lo de fora sem `?explicar=true` por cliente.
 
 > **O alarme já nasceu errado uma vez, e o conserto está comentado no código.** A
 > primeira versão guardava um `[ordered]@{}` e montava a descrição na hora de
