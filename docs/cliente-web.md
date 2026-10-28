@@ -106,12 +106,34 @@ o único caso em que esta rota responde `4xx`.
 |---|---|
 | `melhorOferta` | a única pergunta que a jornada tem: qual oferta eu aciono |
 | `itens[].ofertaId` | vazio significa "não é oferta", nunca "oferta sem id" |
-| `itens[].origem` | `EVENTO` merece destaque visual; `HISTORICO` merece ícone de relógio |
+| `itens[].origem` | `EVENTO` merece destaque visual; `HISTORICO` merece ícone de relógio; `SUBSTITUTO` não casou com o que foi digitado |
 | `itens[].rotulo` | quando preenchido, é o motivo ("pela sua última tentativa de Pix") |
 | `degradada` | `true` = o perfil não carregou e a lista é a popular do segmento |
 
 `degradada` existe para o app **não registrar a impressão como personalizada**.
 Se ela for registrada como se fosse, a camada de aprendizado aprende com ruído.
+
+> **`melhorOferta` é ausente do JSON, não `null`.** A resposta usa
+> `@JsonInclude(NON_NULL)`, então quando não há oferta o campo **não aparece**.
+> Um `if (resposta.melhorOferta === null)` nunca é verdadeiro e o seu código
+> conclui que há oferta. Teste por falsidade:
+>
+> ```js
+> if (!resposta.melhorOferta) { /* nao ha oferta elegivel para esta pessoa */ }
+> ```
+>
+> Esta armadilha foi encontrada escrevendo
+> [`requisicoes/postman-front-typeahead.json`](../requisicoes/postman-front-typeahead.json),
+> que é onde ela devia ser encontrada: por um cliente, e não por um teste de
+> unidade.
+
+**`SUBSTITUTO` é a origem que merece tratamento próprio na tela.** Ela aparece
+quando a busca encontrou algo e o perfil da pessoa removeu — e a linha que entrou
+no lugar casou com a **jornada**, não com o texto digitado. Então destacar o
+prefixo dentro do termo (o *highlight* usual de typeahead) não vai casar nada, e
+chamá-la de "resultado para *veículos*" seria mentira. Ela é um caminho
+alternativo: trate como tal, e nunca a conte como oferta — ela vem sempre sem
+`ofertaId` e sem `produtoAlvo`.
 
 ---
 
@@ -145,8 +167,13 @@ API devolve `prefixo` exatamente para isso.
 
 ### 3.4 Lista vazia não é erro
 
-Prefixo curto, nada elegível para a pessoa, ou índice fora do ar — os três dão
-lista vazia com `200`. Trate como "nada a mostrar", nunca como falha.
+Prefixo curto, nada que casou com o que foi digitado, ou índice fora do ar — os
+três dão lista vazia com `200`. Trate como "nada a mostrar", nunca como falha.
+
+O caso de *nada elegível para a pessoa* saiu desta lista: quando a busca encontra
+algo e o perfil remove, entra uma linha `SUBSTITUTO` da jornada em vez de lista
+vazia. Mas **continue tratando a lista vazia**, porque ela continua acontecendo
+nos outros três casos — e, deliberadamente, quando nada casou com o prefixo.
 
 ---
 
@@ -426,4 +453,19 @@ explicação, não a oferta.
 - [ ] `SUGESTAO_EXIBIDA` com `termosExibidos` e `listaDegradada`
 - [ ] `SUGESTAO_CLICADA` com `posicao`, e `keepalive` porque o clique navega
 - [ ] `origem: "EVENTO"` com destaque visual; `rotulo` exibido quando vier
+- [ ] `origem: "SUBSTITUTO"` sem *highlight* do prefixo e nunca contada como oferta
 - [ ] `melhorOferta` ausente tratada como "não há oferta", não como falta de dado
+      — e o teste é `if (!resposta.melhorOferta)`, nunca `=== null`
+
+E antes de dar a integração por pronta, rode o contrato contra a sua instância:
+
+```powershell
+npx --yes newman@6 run .\requisicoes\postman-front-typeahead.json `
+    --env-var segredo="$env:SUGESTAO_SEGREDO"
+```
+
+São **160 asserções** sobre exatamente o que esta página promete — uma sessão de
+digitação de `e` até `emprestimo`, a impressão, o toque, a lista resgatada e os
+casos que não podem virar erro. Nove delas são invariantes que valem em *toda*
+resposta `200` da rota de busca, e é nelas que o seu código pode confiar sem ler
+o servidor.

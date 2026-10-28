@@ -102,7 +102,11 @@ public record Candidato(
     private static Procedencia procedenciaDe(Origem origem) {
         return switch (origem) {
             case HISTORICO -> Procedencia.CLIENTE;
-            case CATALOGO -> Procedencia.CATALOGO;
+            // A substituta é decisão de produto declarada na configuração, não
+            // comportamento de ninguém: não há sujeito para reidentificar, e o
+            // piso de k-anonimato não se aplica. É a mesma razão que vale para a
+            // oferta recém-cadastrada.
+            case CATALOGO, SUBSTITUTO -> Procedencia.CATALOGO;
             case POPULAR, EVENTO -> Procedencia.LOG;
         };
     }

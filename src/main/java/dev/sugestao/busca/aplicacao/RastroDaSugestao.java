@@ -78,7 +78,27 @@ public record RastroDaSugestao(
      * {@code q=financiamento}: uma linha de ação, nenhuma oferta, nenhum alarme
      * possível com o que estava medido.
      */
-    public record Linha(int posicao, String ofertaId, String termo, Origem origem,
+    public record Linha(int posicao, String ofertaId, String termo,
+
+                        /**
+                         * A jornada desta linha.
+                         *
+                         * <p>Entrou junto com a linha substituta, e por uma razão
+                         * de medição: a jornada é o <em>único</em> rótulo que
+                         * torna o contador de substitutas acionável. Saber que
+                         * 4% das buscas foram resgatadas não diz o que fazer;
+                         * saber que elas são quase todas de {@code credito} diz —
+                         * há oferta de crédito que casa com o que as pessoas
+                         * digitam e que quase ninguém pode contratar, e isso é
+                         * conversa de catálogo, não de relevância.
+                         *
+                         * <p>É também um rótulo publicável: vem do catálogo, não
+                         * do texto digitado, e a cardinalidade é "quantos
+                         * produtos o banco tem". Ver {@code MedidorMicrometer}.
+                         */
+                        String jornada,
+
+                        Origem origem,
                         double relevancia,
 
                         /**
@@ -105,6 +125,7 @@ public record RastroDaSugestao(
 
         public Linha {
             ofertaId = ofertaId == null ? "" : ofertaId;
+            jornada = jornada == null ? "" : jornada;
             fadiga = fadiga <= 0 ? 1.0 : fadiga;
         }
 
@@ -131,8 +152,22 @@ public record RastroDaSugestao(
                         candidatosDoIndice, candidatosDoHistorico, promovidosAEvento,
                         jornadaLider.isBlank() ? "-" : jornadaLider,
                         tolerancia,
-                        descartes.size(), linhas.size(), temOferta() ? " (com oferta)" : "",
+                        descartes.size(), linhas.size(), marcaDaLista(),
                         msTotal, msAteIndice, msAtePerfil);
+    }
+
+    /**
+     * O que destaca esta lista no log de uma linha.
+     *
+     * <p>A substituição vem antes de "com oferta" porque as duas são exclusivas —
+     * a substituta nunca é oferta — e porque, das duas, é a que alguém lendo o log
+     * precisa ver: ela diz que a lista <em>ia vir vazia</em>.
+     */
+    private String marcaDaLista() {
+        if (substituida()) {
+            return " (substituida por " + jornadaSubstituta() + ")";
+        }
+        return temOferta() ? " (com oferta)" : "";
     }
 
     /**
@@ -149,6 +184,34 @@ public record RastroDaSugestao(
     /** Alguma linha entregue é oferta acionável. */
     public boolean temOferta() {
         return linhas.stream().anyMatch(Linha::ehOferta);
+    }
+
+    /**
+     * A lista teria vindo vazia e foi resgatada por uma linha de jornada.
+     *
+     * <p>É derivado da origem da linha, e não um campo novo no rastro, porque a
+     * linha já se declara: ver {@link dev.sugestao.busca.dominio.Origem#SUBSTITUTO}.
+     * Um booleano separado seria um segundo lugar dizendo a mesma coisa, e os dois
+     * poderiam discordar.
+     */
+    public boolean substituida() {
+        return linhas.stream().anyMatch(linha -> linha.origem() == Origem.SUBSTITUTO);
+    }
+
+    /**
+     * A jornada da linha substituta, ou vazio quando não houve substituição.
+     *
+     * <p>Serve à métrica, e é o único rótulo que ela precisa: substituta alta numa
+     * jornada não é problema de busca, é catálogo mal direcionado — há oferta que
+     * casa com o que as pessoas digitam e que quase ninguém pode contratar. Essa
+     * leitura é para o time de produto, e sem a jornada no contador ela não existe.
+     */
+    public String jornadaSubstituta() {
+        return linhas.stream()
+                .filter(linha -> linha.origem() == Origem.SUBSTITUTO)
+                .map(Linha::jornada)
+                .findFirst()
+                .orElse("");
     }
 
     /** Quantas linhas foram rebaixadas pela fadiga. */

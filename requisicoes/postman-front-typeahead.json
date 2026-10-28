@@ -1,0 +1,761 @@
+{
+  "info": {
+    "name": "sugestao-busca - um front digitando",
+    "description": "UMA SESSAO DE DIGITACAO, DO JEITO QUE UM APP FAZ.\n\nA outra collection (postman-sugestao-busca.json) exercita o CADASTRO e a matriz de autorizacao. Esta exercita o CONSUMO: uma pessoa digitando letra por letra, o app renderizando, registrando o que mostrou, registrando o toque. E as invariantes que um front precisa que sejam verdade.\n\nPOR QUE UMA COLLECTION E NAO MAIS UM TESTE JUNIT\n\nOs 200 testes do projeto provam o dominio e o caso de uso. Nenhum deles passa por HTTP de verdade, e e no HTTP que mora o que o front enxerga: codigo de status, cabecalho, charset, forma do JSON, numeracao de posicao. O defeito de charset deste repositorio e a prova: todo teste JUnit passava, e todo termo acentuado chegava ilegivel ao cliente.\n\nAS INVARIANTES UNIVERSAIS ESTAO NO EVENT 'test' DA COLLECTION, nao repetidas em cada request. Elas rodam depois de TODA resposta 200 da rota de busca - nove afirmacoes que nenhuma entrada pode quebrar. Um front escrito contra esta API pode confiar nelas.\n\nCOMO RODAR\n\n    newman run requisicoes\\postman-front-typeahead.json --env-var segredo=\"$env:SUGESTAO_SEGREDO\"\n\nExige o perfil 'local' da aplicacao (CORS e explicacao ligados) e o Solr semeado.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "host", "value": "http://localhost:8080" },
+    { "key": "segredo", "value": "COLE-AQUI-OU-USE---env-var-segredo" },
+    { "key": "emissor", "value": "https://sugestao-busca.dev" },
+    { "key": "origemDoFront", "value": "http://localhost:3000" },
+    { "key": "cliente", "value": "pf-pix-recusado" },
+    { "key": "clienteNovo", "value": "pf-novo" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Assina os tokens desta rodada, aqui mesmo - mesmo padrao da",
+          "// collection de cadastro, e pelo mesmo motivo: token escrito em",
+          "// arquivo versionado e token que expira, e a partir do dia seguinte a",
+          "// collection falha por um motivo que nao e o codigo.",
+          "//",
+          "// E um front de verdade tambem nao assina: ele RECEBE o token do",
+          "// provedor de identidade. Este bloco faz o papel do provedor, que o",
+          "// servico deliberadamente nao tem - ele valida e nao emite.",
+          "const SEGREDO = pm.environment.get('segredo') || pm.collectionVariables.get('segredo');",
+          "if (!SEGREDO || SEGREDO.indexOf('COLE-AQUI') === 0) {",
+          "    throw new Error('Defina o segredo: --env-var segredo=... no newman, ou a variavel da collection no Postman.');",
+          "}",
+          "const EMISSOR = pm.collectionVariables.get('emissor');",
+          "",
+          "function base64url(palavras) {",
+          "    return CryptoJS.enc.Base64.stringify(palavras)",
+          "        .replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "}",
+          "",
+          "function assinar(corpo) {",
+          "    // JSON.stringify sem espaco: o que se assina e o que se envia, byte",
+          "    // a byte.",
+          "    const cabecalho = base64url(CryptoJS.enc.Utf8.parse(",
+          "        JSON.stringify({ alg: 'HS256', typ: 'JWT' })));",
+          "    const conteudo = base64url(CryptoJS.enc.Utf8.parse(JSON.stringify(corpo)));",
+          "    const aAssinar = cabecalho + '.' + conteudo;",
+          "    return aAssinar + '.' + base64url(CryptoJS.HmacSHA256(aAssinar, SEGREDO));",
+          "}",
+          "",
+          "const agora = Math.floor(Date.now() / 1000);",
+          "const comum = { iss: EMISSOR, iat: agora, exp: agora + 600 };",
+          "",
+          "// O escopo e o que um app de cliente recebe: ler sugestao e escrever",
+          "// evento. Nada de cadastrar oferta.",
+          "pm.collectionVariables.set('tokenCliente', assinar(Object.assign({}, comum, {",
+          "    sub: pm.collectionVariables.get('cliente'),",
+          "    segmento: 'PF',",
+          "    relacionamento: 'VAREJO',",
+          "    scope: 'sugestao:ler eventos:escrever'",
+          "})));",
+          "",
+          "pm.collectionVariables.set('tokenNovo', assinar(Object.assign({}, comum, {",
+          "    sub: pm.collectionVariables.get('clienteNovo'),",
+          "    segmento: 'PF',",
+          "    relacionamento: 'VAREJO',",
+          "    scope: 'sugestao:ler eventos:escrever'",
+          "})));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// AS INVARIANTES DO CONTRATO, declaradas uma vez e verificadas em toda",
+          "// resposta 200 da rota de busca.",
+          "//",
+          "// Nenhuma entrada desta collection pode quebra-las. Um front escrito",
+          "// contra esta API pode confiar nelas sem ler o codigo do servidor - e e",
+          "// essa a diferenca entre documentacao e contrato.",
+          "",
+          "// Só GET: o preflight do navegador tem o MESMO caminho e devolve 200",
+          "// com corpo vazio, e sem este filtro a primeira invariante tentaria",
+          "// ler JSON de uma resposta que legitimamente nao tem nenhum.",
+          "const ehBusca = pm.request.method === 'GET'",
+          "    && pm.request.url.getPath() === '/v1/sugestoes';",
+          "if (!ehBusca || pm.response.code !== 200) { return; }",
+          "",
+          "const corpo = pm.response.json();",
+          "const itens = corpo.itens;",
+          "",
+          "pm.test('[contrato] itens e sempre um array, mesmo vazio', function () {",
+          "    pm.expect(itens).to.be.an('array');",
+          "});",
+          "",
+          "pm.test('[contrato] Content-Type declara charset=UTF-8', function () {",
+          "    // Sem isto, cliente que precisa adivinhar cai para ISO-8859-1 e",
+          "    // 'empréstimo pessoal' chega como 'emprÃ©stimo pessoal'. Era uma",
+          "    // inconsistencia anotada como cosmetica, e custou uma medicao de",
+          "    // ranking inteira antes de alguem notar.",
+          "    pm.expect(pm.response.headers.get('Content-Type').toLowerCase())",
+          "        .to.include('charset=utf-8');",
+          "});",
+          "",
+          "pm.test('[contrato] nenhum termo chega com acento corrompido', function () {",
+          "    // A verificacao que um front faria de olho na tela. 'Ã' e 'U+FFFD'",
+          "    // sao as assinaturas de UTF-8 lido como latin-1 e de byte perdido.",
+          "    itens.forEach(function (item) {",
+          "        pm.expect(item.termo, 'termo ' + item.termo).to.not.match(/[Ã]|\\uFFFD/);",
+          "    });",
+          "});",
+          "",
+          "pm.test('[contrato] posicao e 0..n-1, sem furo', function () {",
+          "    // O front registra a impressao usando esta posicao. Furo aqui faz a",
+          "    // camada de aprendizado associar clique a linha errada.",
+          "    itens.forEach(function (item, i) {",
+          "        pm.expect(item.posicao, 'posicao do item ' + i).to.eql(i);",
+          "    });",
+          "});",
+          "",
+          "pm.test('[contrato] todo destino e caminho relativo, sem esquema', function () {",
+          "    // O app navega para este valor. URL absoluta aqui faria da resposta",
+          "    // um redirecionador aberto com o nome do banco na frente.",
+          "    itens.forEach(function (item) {",
+          "        pm.expect(item.destino, 'destino de ' + item.termo).to.match(/^\\/(?!\\/)/);",
+          "    });",
+          "});",
+          "",
+          "pm.test('[contrato] a ordem cai por relevancia, exceto a linha de evento', function () {",
+          "    // A linha de EVENTO abre a lista por COTA, nao por score: ela pode ter",
+          "    // relevancia menor que a seguinte, e isso e o desenho. Da segunda",
+          "    // posicao em diante a ordem e monotona.",
+          "    const inicio = (itens.length > 0 && itens[0].origem === 'EVENTO') ? 1 : 0;",
+          "    for (let i = inicio + 1; i < itens.length; i++) {",
+          "        pm.expect(itens[i].relevancia, 'item ' + i + ' vs ' + (i - 1))",
+          "            .to.be.at.most(itens[i - 1].relevancia);",
+          "    }",
+          "});",
+          "",
+          "pm.test('[contrato] melhorOferta aponta para um item que E oferta', function () {",
+          "    // Nulo e resposta legitima: prefixo que so casa com artigo de ajuda,",
+          "    // ou cliente com todas as ofertas vetadas. O que nao pode e apontar",
+          "    // para linha sem identificador - a jornada receberia um id que ela nao",
+          "    // tem como acionar.",
+          "    if (!corpo.melhorOferta) { return; }",
+          "    const alvo = itens[corpo.melhorOferta.posicao];",
+          "    pm.expect(alvo, 'item na posicao anunciada').to.be.an('object');",
+          "    pm.expect(alvo.ofertaId).to.eql(corpo.melhorOferta.ofertaId);",
+          "    pm.expect(alvo.ofertaId).to.not.be.empty;",
+          "    pm.expect(alvo.produtoAlvo).to.not.be.empty;",
+          "});",
+          "",
+          "pm.test('[contrato] linha sem ofertaId tambem vem sem produtoAlvo', function () {",
+          "    // 'Nao e oferta' e um estado, nao um cadastro pela metade. Os dois",
+          "    // campos andam juntos, e e isso que deixa o front testar um so.",
+          "    itens.forEach(function (item) {",
+          "        if (!item.ofertaId) {",
+          "            pm.expect(item.produtoAlvo, 'produtoAlvo de ' + item.termo).to.be.empty;",
+          "        }",
+          "    });",
+          "});",
+          "",
+          "pm.test('[contrato] os cabecalhos de limite de taxa saem em TODA resposta', function () {",
+          "    // Nao so no 429. Um cliente que so descobre o limite ao ser recusado",
+          "    // nao tem como se comportar antes; com estes, o front aumenta o",
+          "    // debounce ao ver a sobra encolher.",
+          "    pm.expect(pm.response.headers.has('RateLimit-Limit')).to.be.true;",
+          "    pm.expect(pm.response.headers.has('RateLimit-Remaining')).to.be.true;",
+          "    pm.expect(pm.response.headers.has('RateLimit-Reset')).to.be.true;",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00. o navegador pede permissao antes de qualquer coisa (preflight)",
+      "request": {
+        "method": "OPTIONS",
+        "header": [
+          { "key": "Origin", "value": "{{origemDoFront}}" },
+          { "key": "Access-Control-Request-Method", "value": "GET" },
+          { "key": "Access-Control-Request-Headers", "value": "authorization" }
+        ],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=em", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "em" }] },
+        "description": "Sem isto nada do resto acontece num navegador: o 200 chega e o JavaScript nunca ve a resposta. E o preflight e pago A CADA GET enquanto o max-age nao estiver configurado - numa caixa de busca isso DOBRARIA o numero de requisicoes."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('o preflight e autorizado para a origem do front', function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 204]);",
+              "    pm.expect(pm.response.headers.get('Access-Control-Allow-Origin'))",
+              "        .to.eql(pm.collectionVariables.get('origemDoFront'));",
+              "});",
+              "",
+              "pm.test('o navegador guarda a autorizacao, senao sao duas requisicoes por tecla', function () {",
+              "    const maxAge = parseInt(pm.response.headers.get('Access-Control-Max-Age'), 10);",
+              "    pm.expect(maxAge, 'Access-Control-Max-Age').to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "01. tecla 1: 'e' - uma letra nao e busca, e nao e erro",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=e", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "e" }] },
+        "description": "O prefixo minimo e 2. Abaixo dele a resposta e lista vazia, NUNCA 400: uma caixa de busca que devolve erro enquanto a pessoa digita e pior que uma que devolve nada - e recusar com erro informa ao chamador abusivo onde exatamente esta o limite."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 com lista vazia, nao 400', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().itens).to.be.empty;",
+              "});",
+              "",
+              "// AQUI HAVIA UMA ASSERCAO DE TEMPO, e ela foi removida.",
+              "//",
+              "// Era `responseTime < 200`, com a intencao de provar que o corte por",
+              "// tamanho de prefixo acontece antes de qualquer rede. Mas o que ela",
+              "// mede e a maquina: numa JVM fria a primeira requisicao passa de 200 ms",
+              "// legitimamente, e o teste falharia acusando a aplicacao de um defeito",
+              "// que e do relogio. O proprio projeto declara essa regra em",
+              "// SugerirSugestoesCasoDeUsoTest - 'teste que mede tempo de maquina sem",
+              "// querer e teste que falha sozinho as sextas-feiras' - e eu a quebrei",
+              "// na primeira versao desta collection.",
+              "//",
+              "// Quem mede latencia de verdade e requisicoes\\bater.ps1, com aquecimento",
+              "// e percentis, e o Timer sugestao.latencia no Actuator. Contrato e",
+              "// desempenho sao duas suites, e junta-las faz a de contrato piscar."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02. tecla 2: 'em'",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=em", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "em" }] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('a partir de duas letras a busca acontece', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('o perfil desta pessoa foi encontrado: a lista nao e degradada', function () {",
+              "    // 'degradada' e o que o app usa para NAO registrar a impressao como",
+              "    // personalizada. Sem isso, a camada de aprendizado aprenderia com",
+              "    // ruido vindo de lista popular.",
+              "    pm.expect(pm.response.json().degradada).to.be.false;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03. tecla 3: 'emp'",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emp", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emp" }] }
+      }
+    },
+    {
+      "name": "04. tecla 5: 'empre'",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=empre", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "empre" }] }
+      }
+    },
+    {
+      "name": "05. tecla 7: 'emprest'",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprest", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprest" }] }
+      }
+    },
+    {
+      "name": "06. tecla 10: 'emprestimo' - a oferta aparece, e com acento",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprestimo", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprestimo" }] },
+        "description": "O prefixo digitado nao tem acento; o termo no indice tem. A normalizacao resolve na entrada, e o charset resolve na saida. Guarda a posicao e o ofertaId para o front registrar a impressao e o toque."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const corpo = pm.response.json();",
+              "",
+              "pm.test('a oferta de emprestimo esta na lista, escrita corretamente', function () {",
+              "    const termos = corpo.itens.map(function (i) { return i.termo; });",
+              "    pm.expect(termos).to.include('empréstimo pessoal');",
+              "});",
+              "",
+              "pm.test('ha uma melhor oferta para a jornada acionar', function () {",
+              "    pm.expect(corpo.melhorOferta, 'melhorOferta').to.not.be.null;",
+              "    pm.expect(corpo.melhorOferta.jornada).to.eql('credito');",
+              "});",
+              "",
+              "// O front guarda o que renderizou. E com estes valores que ele vai",
+              "// registrar a impressao - a posicao vem numerada do servidor, porque",
+              "// quem sabe em que linha cada sugestao ficou e quem montou a lista.",
+              "pm.collectionVariables.set('termosRenderizados',",
+              "    JSON.stringify(corpo.itens.map(function (i) { return i.termo; })));",
+              "pm.collectionVariables.set('listaDegradada', String(corpo.degradada));",
+              "pm.collectionVariables.set('ofertaClicada', corpo.melhorOferta.ofertaId);",
+              "pm.collectionVariables.set('termoClicado', corpo.melhorOferta.termo);",
+              "pm.collectionVariables.set('posicaoClicada', String(corpo.melhorOferta.posicao));",
+              "pm.collectionVariables.set('produtoClicado', corpo.melhorOferta.produtoAlvo);",
+              "pm.collectionVariables.set('jornadaClicada', corpo.melhorOferta.jornada);",
+              "",
+              "// E a lista inteira, para o proximo request conferir a propriedade do",
+              "// ?limite=.",
+              "pm.collectionVariables.set('primeiroTermoDaLista', corpo.itens[0].termo);"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "07. ?limite=1 devolve o item da posicao 0, nao outro",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprestimo&limite=1", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprestimo" }, { "key": "limite", "value": "1" }] },
+        "description": "A propriedade que importa para quem integra: pedir N devolve exatamente os N primeiros de pedir o maximo. As cotas de origem NAO encolhem junto - se encolhessem, limite=1 zeraria a vaga do evento e devolveria outra linha, nao a mesma lista mais curta."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const itens = pm.response.json().itens;",
+              "",
+              "pm.test('uma linha so', function () {",
+              "    pm.expect(itens).to.have.lengthOf(1);",
+              "});",
+              "",
+              "pm.test('e e a MESMA linha que estava na posicao 0 da lista completa', function () {",
+              "    pm.expect(itens[0].termo).to.eql(pm.collectionVariables.get('primeiroTermoDaLista'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "08. o front registra o que MOSTROU (impressao com posicao)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{tokenCliente}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[\n  {\n    \"tipo\": \"SUGESTAO_EXIBIDA\",\n    \"termo\": \"emprestimo\",\n    \"termosExibidos\": {{termosRenderizados}},\n    \"listaDegradada\": {{listaDegradada}},\n    \"jornada\": \"credito\"\n  }\n]"
+        },
+        "url": { "raw": "{{host}}/v1/eventos", "host": ["{{host}}"], "path": ["v1", "eventos"] },
+        "description": "SEM IMPRESSAO NAO HA DENOMINADOR: clique sobre clique mede popularidade, nao acerto. E note que NAO HA clienteId no corpo - ele vem do token. Se viesse do corpo, qualquer cliente atribuiria eventos a qualquer outro, e como e esse identificador que a agregacao conta para medir clientes distintos, quem controlasse o corpo controlaria o piso de k-anonimato."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('202, nao 200: o app nao espera a agregacao', function () {",
+              "    // O que ele manda e registro, nao pedido. Qualquer trabalho feito",
+              "    // com alguem esperando neste caminho e tempo cobrado de uma pessoa",
+              "    // que ja terminou de buscar.",
+              "    pm.response.to.have.status(202);",
+              "});",
+              "",
+              "pm.test('o evento foi aceito inteiro, nada descartado', function () {",
+              "    // 'aceitos' e 'descartados', e nao 'recebidos'. O record tem um",
+              "    // acessor recebidos() que soma os dois, e ele NAO sai no JSON -",
+              "    // Jackson serializa os componentes do record, nao os metodos",
+              "    // derivados. Um front que esperasse 'recebidos' leria undefined.",
+              "    const corpo = pm.response.json();",
+              "    pm.expect(corpo.aceitos).to.eql(1);",
+              "    pm.expect(corpo.descartados).to.eql(0);",
+              "});",
+              "",
+              "pm.test('e o termo descartado NUNCA volta no corpo, so a contagem', function () {",
+              "    // Devolver 'descartei pagar boleto do joao da silva' recriaria,",
+              "    // numa resposta HTTP, exatamente o vazamento que o portao de",
+              "    // saneamento acabou de impedir. O que sai e contagem por motivo.",
+              "    pm.expect(pm.response.json().motivos).to.be.an('object');",
+              "    pm.expect(pm.response.text()).to.not.include('termo');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09. o front registra o TOQUE, na posicao que o servidor numerou",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{tokenCliente}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "[\n  {\n    \"tipo\": \"SUGESTAO_CLICADA\",\n    \"termo\": \"{{termoClicado}}\",\n    \"posicao\": {{posicaoClicada}},\n    \"produto\": \"{{produtoClicado}}\",\n    \"jornada\": \"{{jornadaClicada}}\",\n    \"listaDegradada\": {{listaDegradada}}\n  }\n]"
+        },
+        "url": { "raw": "{{host}}/v1/eventos", "host": ["{{host}}"], "path": ["v1", "eventos"] },
+        "description": "A posicao vem do servidor, nao do front. E a distribuicao dela que diz se o ranking acerta: com ranking bom a massa concentra em 0 e 1. Se o front inventasse a posicao, a unica metrica de qualidade de ordem que existe em producao passaria a medir o front."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('aceito', function () {",
+              "    pm.response.to.have.status(202);",
+              "    pm.expect(pm.response.json().descartados).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "10. gatilho ativo: o evento abre a lista, com rotulo proprio",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=limite", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "limite" }] },
+        "description": "Este cliente teve um Pix recusado ha duas horas. O gatilho esta no perfil, o 'gatilho_ss' esta no documento, e o cruzamento acontece no dominio - nao no indice, para a consulta ao Solr nao ter de esperar o perfil. A linha ganha COTA, nao score: se disputasse por score, um gatilho forte empurraria a lista inteira para uma intencao que a pessoa talvez nem estivesse perseguindo."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const itens = pm.response.json().itens;",
+              "",
+              "pm.test('a primeira linha e a do evento', function () {",
+              "    pm.expect(itens[0].origem).to.eql('EVENTO');",
+              "});",
+              "",
+              "pm.test('o evento tem cota de UMA linha: ele e oportuno, nao dominante', function () {",
+              "    const eventos = itens.filter(function (i) { return i.origem === 'EVENTO'; });",
+              "    pm.expect(eventos).to.have.lengthOf(1);",
+              "});",
+              "",
+              "pm.test('e traz um rotulo para o front explicar por que ela esta ali', function () {",
+              "    pm.expect(itens[0].rotulo).to.not.be.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "11. LISTA RESGATADA: a oferta foi removida e a jornada respondeu",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=veiculos", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "veiculos" }] },
+        "description": "A busca acha 'financiamento de veiculo'; a peneira o remove por elegibilidade, com razao - oferecer o que a pessoa nao pode contratar e problema de conduta. A remocao esta certa; a LISTA VAZIA era o defeito. Entra a linha nao-condicional da jornada."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const corpo = pm.response.json();",
+              "",
+              "pm.test('a lista NAO vem vazia', function () {",
+              "    pm.expect(corpo.itens).to.not.be.empty;",
+              "});",
+              "",
+              "pm.test('a linha se declara SUBSTITUTO, para o front poder exibi-la diferente', function () {",
+              "    // Ela nao casou com o que a pessoa digitou - casou com a JORNADA do",
+              "    // que foi removido. Sem origem propria, o front nao teria como saber.",
+              "    pm.expect(corpo.itens[0].origem).to.eql('SUBSTITUTO');",
+              "    pm.expect(corpo.itens[0].jornada).to.eql('credito');",
+              "});",
+              "",
+              "pm.test('ela NUNCA e anunciada como oferta acionavel', function () {",
+              "    pm.expect(corpo.itens[0].ofertaId).to.be.empty;",
+              "    pm.expect(corpo.itens[0].produtoAlvo).to.be.empty;",
+              "",
+              "    // AUSENTE do JSON, e nao null: a resposta usa",
+              "    // @JsonInclude(NON_NULL). E uma armadilha de integracao de",
+              "    // verdade - um front que testasse `melhorOferta === null`",
+              "    // concluiria que HA oferta. O teste certo e falsidade:",
+              "    // `if (!resposta.melhorOferta)`.",
+              "    pm.expect(corpo).to.not.have.property('melhorOferta');",
+              "    pm.expect(!corpo.melhorOferta, 'o teste que um front deve fazer').to.be.true;",
+              "});",
+              "",
+              "pm.test('e nao conta ao front POR QUE a oferta saiu', function () {",
+              "    // A regra de privacidade do recurso: a linha e funcao da jornada,",
+              "    // nunca do motivo. As quatro razoes de remocao produzem resposta",
+              "    // identica, e nenhuma e distinguivel de fora. Sem ?explicar=true,",
+              "    // nada na resposta nomeia a decisao da peneira.",
+              "    pm.expect(corpo.explicacao, 'explicacao').to.be.undefined;",
+              "    pm.expect(pm.response.text()).to.not.include('SEM_ELEGIBILIDADE');",
+              "    pm.expect(pm.response.text()).to.not.include('elegibilidade');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. cliente novo, mesma situacao: tambem e resgatado",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenNovo}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=imobiliario", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "imobiliario" }] },
+        "description": "A primeira digitacao de alguem que acabou de instalar o app. Antes: lista vazia. Agora: o caminho da jornada."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const corpo = pm.response.json();",
+              "",
+              "pm.test('resgatada tambem para quem nao tem historia nenhuma', function () {",
+              "    pm.expect(corpo.itens).to.have.lengthOf(1);",
+              "    pm.expect(corpo.itens[0].origem).to.eql('SUBSTITUTO');",
+              "});",
+              "",
+              "pm.test('o destino e navegavel pelo app', function () {",
+              "    pm.expect(corpo.itens[0].destino).to.match(/^\\/app\\//);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. e a lista vazia continua vazia quando NADA casou",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=xpto9988", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "xpto9988" }] },
+        "description": "A REGRA QUE MANTEM O RESGATE HONESTO. Sem ela, qualquer prefixo sem resultado passaria a devolver uma linha de ajuda qualquer - e o recurso deixaria de resgatar busca e passaria a MASCARAR falha de cobertura, que e a metrica mais importante do projeto. Nao ha jornada a oferecer aqui, e inventar uma devolveria algo que ninguem procurou."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 com lista vazia: zero-resultado nao e mascarado', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().itens).to.be.empty;",
+              "});",
+              "",
+              "pm.test('e nenhuma substituta apareceu', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('SUBSTITUTO');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "14. erro de digitacao: o front nao corrige, o servidor sim",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprestmo", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprestmo" }] },
+        "description": "Nove letras, uma faltando. A tolerancia so dispara quando a consulta exata trouxe menos de tres candidatos, e os resultados dela vao para o FIM - nenhuma recuperacao de erro de digitacao passa na frente de um casamento exato, porque o score dela mede semelhanca de escrita e os dois numeros nao sao comparaveis."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('a oferta certa foi encontrada apesar do erro', function () {",
+              "    const termos = pm.response.json().itens.map(function (i) { return i.termo; });",
+              "    pm.expect(termos).to.include('empréstimo pessoal');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "15. a rota de busca nao devolve erro, qualquer que seja a entrada",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprestimo&limite=nao-e-numero&explicar=talvez", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprestimo" }, { "key": "limite", "value": "nao-e-numero" }, { "key": "explicar", "value": "talvez" }] },
+        "description": "Os dois parametros opcionais chegam como TEXTO ao controller, e nao como int e boolean, por isto: a conversao do Spring falha alto, e um ?limite=tres viraria 400 antes de qualquer codigo nosso rodar - seria o unico jeito de esta rota responder com erro. Lidos como texto, valor estranho cai no padrao e a lista sai. Ninguem depura uma caixa de busca pelo codigo de status."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200, e o limite ilegivel caiu no padrao', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().itens.length).to.be.above(0);",
+              "});",
+              "",
+              "pm.test('?explicar com valor estranho NAO liga a explicacao', function () {",
+              "    // Falha fechada, e aqui tem peso: a explicacao lista os descartes, e",
+              "    // os descartes dizem quais produtos aquele cliente nao pode",
+              "    // contratar. Interpretar generosamente seria vazar informacao sobre",
+              "    // a pessoa por causa de uma query mal escrita.",
+              "    pm.expect(pm.response.json().explicacao, 'explicacao').to.be.undefined;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. ?limite acima do teto e limitado em silencio, nao recusado",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{tokenCliente}}" }],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=pix&limite=999", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "pix" }, { "key": "limite", "value": "999" }] },
+        "description": "O teto protege o servico; recusar com erro ensinaria ao chamador exatamente onde ele esta, e transformaria um pedido grande demais em falha quando devolver oito e uma resposta perfeitamente util."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('no maximo 8 linhas, e sem erro', function () {",
+              "    pm.response.to.have.status(200);",
+              "    pm.expect(pm.response.json().itens.length).to.be.at.most(8);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "17. sem token, o front nao passa (e o erro e legivel)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{host}}/v1/sugestoes?q=emprestimo", "host": ["{{host}}"], "path": ["v1", "sugestoes"], "query": [{ "key": "q", "value": "emprestimo" }] },
+        "description": "A excecao a 'esta rota nunca devolve erro': nao autenticado nao chega a ser uma busca. RFC 9457, para o front tratar como qualquer outro problema da plataforma."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401 em problem+json', function () {",
+              "    pm.response.to.have.status(401);",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('problem+json');",
+              "});",
+              "",
+              "pm.test('e o corpo nao conta nada sobre o catalogo nem sobre ninguem', function () {",
+              "    const texto = pm.response.text();",
+              "    pm.expect(texto).to.not.include('emprestimo');",
+              "    pm.expect(texto).to.not.include('pf-');",
+              "});",
+              "",
+              "pm.test('e o problema tambem declara charset', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type').toLowerCase())",
+              "        .to.include('charset=utf-8');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "18. corpo quebrado: 400 legivel, e com charset tambem no erro",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{tokenCliente}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": { "mode": "raw", "raw": "[{\"tipo\":\"SUGESTAO_EXIBIDA\"," },
+        "url": { "raw": "{{host}}/v1/eventos", "host": ["{{host}}"], "path": ["v1", "eventos"] },
+        "description": "O caminho do TratadorDeErros, e nao o da cadeia de seguranca - sao dois produtores de problem+json diferentes, e por isso precisam ser conferidos separado.\n\nFOI AQUI QUE A CORRECAO DE CHARSET FICOU PELA METADE. Os conversores resolvem o caminho de sucesso; o ProblemDetail NAO passa por eles - o Spring escolhe o tipo de resposta dele a partir de uma constante sem charset, e essa escolha vence a lista de suportados. O resultado era a mesma inconsistencia de antes mudada de lugar: sucesso e 401/403 declaravam, 404 e 422 nao.\n\nE o 422 e a resposta mais cheia de texto acentuado deste servico - as mensagens de violacao do cadastro. Ou seja, a correcao tinha deixado de fora exatamente o corpo que mais precisava dela."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400 em problem+json, nao 500', function () {",
+              "    pm.response.to.have.status(400);",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('problem+json');",
+              "});",
+              "",
+              "pm.test('o problema do TratadorDeErros declara charset=UTF-8', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type').toLowerCase())",
+              "        .to.include('charset=utf-8');",
+              "});",
+              "",
+              "pm.test('a mensagem diz o que corrigir, e nao cita classe Java', function () {",
+              "    // A mensagem do Jackson cita nome de classe, nome de campo e por",
+              "    // vezes um trecho do que foi enviado: util no log, indesejado numa",
+              "    // resposta.",
+              "    const corpo = pm.response.json();",
+              "    pm.expect(corpo.type).to.include('corpo-ilegivel');",
+              "    pm.expect(corpo.detail).to.include('ISO-8601');",
+              "    pm.expect(pm.response.text()).to.not.include('com.fasterxml');",
+              "    pm.expect(pm.response.text()).to.not.include('dev.sugestao');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

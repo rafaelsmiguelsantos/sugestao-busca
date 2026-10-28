@@ -630,13 +630,14 @@ vieram depois têm limites conhecidos — esparsidade da afinidade por produto, 
 da tendência, viés de posição da fadiga — e nenhum desses limites é observável sem
 isto.
 
-**O desfecho em quatro valores, e não dois.** Lista vazia ou não vazia é a
+**O desfecho em cinco valores, e não dois.** Lista vazia ou não vazia é a
 classificação óbvia e ela esconde o caso que motivou a rodada:
 
 | desfecho | significado |
 |---|---|
 | `PREFIXO_RECUSADO` | nem era busca — alguém no meio da primeira letra |
 | `ZERO_RESULTADO` | buscou e não achou nada |
+| `SUBSTITUIDA` | ia vir vazia; uma linha de jornada a resgatou |
 | `SEM_OFERTA` | achou linhas, nenhuma acionável |
 | `COM_OFERTA` | achou oferta |
 
@@ -644,6 +645,13 @@ classificação óbvia e ela esconde o caso que motivou a rodada:
 zero-resultado, então nenhum contador de lista vazia acusaria; não era sucesso,
 porque quem buscou financiamento não recebeu proposta. Com dois valores, o caso é
 invisível.
+
+`SUBSTITUIDA` entrou junto com a linha substituta, e entrou **para não estragar o
+`SEM_OFERTA`**: a substituta nunca é oferta, então sem este valor toda busca
+resgatada cairia naquele — que passaria a significar duas coisas opostas. E ele
+preserva a série histórica por construção: **`ZERO_RESULTADO + SUBSTITUIDA` é a
+taxa de zero-resultado de antes do recurso.** A soma mede cobertura de busca, que
+não mudou; a separação mede quanto o resgate converteu.
 
 E `prefixoAceito` foi acrescentado ao rastro só para separar "não encontrou" de
 "nem era busca". Sem isso, a taxa de zero-resultado fica dominada por gente
@@ -1047,10 +1055,232 @@ treina quem lê a ignorar, e aí deixa de servir quando finalmente importa.
 
 ---
 
+## 26. A linha substituta entra depois da mistura, e nunca depende do motivo
+
+A remoção estava certa; a lista vazia era o defeito. Cliente novo digita
+`veiculos`, a busca acha "financiamento de veículo", a peneira o remove por
+elegibilidade — e a resposta era nada. Oferecer o que a pessoa não pode contratar
+é problema de conduta; devolver nada a quem procurou algo que existe no catálogo é
+problema nosso.
+
+**O que tornou isso corrigível sem dado novo** é que a informação já era calculada
+e jogada fora: o `Descarte` carrega jornada e motivo, e em produção o rastro
+inteiro é descartado porque a explicação fica desligada.
+
+**Depois da mistura, e não antes do ranking.** A condição de disparo é "a lista
+final está vazia", e antes da mistura isso ainda não é um fato. Entrar antes seria
+disputar cota e passar pela deduplicação — e a substituta não deve competir com
+nada: ela existe só na ausência de competidores.
+
+**A ordem dos descartes é o critério, e isso dispensou um campo.** A peneira
+percorre os candidatos na ordem em que os recebeu, que é a do índice — melhor
+score primeiro. Então o primeiro descarte condicional é a coisa mais forte que
+casou com o prefixo e teve de sair. Guardar a relevância no `Descarte` para
+ordenar seria **pior**: ela é score cru do Solr para o que veio do índice e um
+valor de 0,5 a 1,0 para o que veio do histórico, e comparar os dois é comparar
+escalas diferentes.
+
+**A regra de privacidade está na assinatura, não num comentário.** O que chega a
+`Substitutos.para` é a **jornada**, e nada mais. As quatro razões condicionais —
+elegibilidade, inadimplência, conta não operante, produto já contratado —
+produzem resposta idêntica, e nenhuma é distinguível de fora. Uma substituta
+escolhida pelo motivo contaria a decisão da peneira por omissão, e a peneira é
+exatamente onde o sistema sabe coisas que a pessoa não pediu para contar a
+ninguém.
+
+**E `ABAIXO_DO_PISO` está deliberadamente fora.** Se termo de log abaixo do piso
+de k-anonimato gerasse substituta, a **presença da linha** informaria que algo
+casou com aquele prefixo — e esconder exatamente isso é a única coisa que o piso
+faz. O recurso que resgata lista vazia não pode ser o canal lateral que desfaz o
+controle de privacidade.
+
+**O conteúdo não é porta, e a recusa foi explícita.** Fazer disso um
+`FonteDeSubstitutos` com adaptador de Solr é tentador — conteúdo de catálogo mora
+no índice. Mas a tabela é consultada no momento em que a lista veio vazia, dentro
+do orçamento de 30 ms, depois de o índice já ter sido consultado uma ou duas
+vezes. Uma porta aqui seria convite permanente a uma terceira ida à rede no pior
+instante possível, e a recuperação passaria a falhar justamente quando o Solr está
+ruim — que é quando mais buscas voltam vazias. Hoje vem da configuração; em
+produção viria do catálogo, lido **na subida**.
+
+Verificado: 32 consultas de avaliação, **2 listas vazias viraram 0**.
+
+---
+
+## 27. O cache de perfil, e por que ele nasce desligado
+
+Terceiro decorador de porta do projeto, depois do disjuntor (13) e do limite de
+taxa (21), e o único dos três que **ficou desligado por padrão** — por um custo
+que foi medido depois de a implementação estar pronta.
+
+> **O achado, primeiro, porque é a parte que vale.** Com o cache ligado,
+> [`requisicoes/verificar-comportamento.ps1`](../requisicoes/verificar-comportamento.ps1)
+> falha em **cinco** verificações: afinidade por produto, fadiga, e o clique que
+> zera a fadiga aparecem todos **inertes**, com relevância idêntica byte a byte
+> antes e depois do aprendizado. Com ele desligado, **as cinco passam.**
+>
+> ```
+> cache ligado:    5 falhas    2.179258 -> 2.179258
+> cache desligado: 0 falhas    2.179283 -> 2.274609
+> ```
+>
+> A causa não é defeito do cache — é o que ele faz. Aquele script roda
+> `POST /v1/aprendizado/rodar` e consulta **na linha seguinte**, e nenhum valor de
+> TTL conserta isso: a segunda leitura acontece milissegundos depois da escrita.
+> O mesmo caminho está em `demonstrar.ps1`, `simular.ps1`, `sugestoes.http`
+> (7.3 → 7.4) e na pasta 4 da collection de exploração.
+>
+> **Em produção esse caminho não existe:** o evento vai para a fila e a rodada
+> roda a cada 15 s, então o efeito de um clique já demora até 15 s para aparecer
+> e mais 5 s de TTL é marginal. O caminho síncrono existe **só** para a
+> demonstração — e é justamente ele que prova três funcionalidades.
+>
+> Então vale a regra deste repositório: o default que viaja aqui é o seguro. O
+> ganho que o cache entrega hoje é argumento de papel; o custo é medido. E o
+> script ganhou um **portão** que detecta o cache ligado e explica, em vez de
+> cinco `FALHA` enganosos — diagnosticar é melhor que dormir, porque um
+> `Start-Sleep` ali esconderia a incompatibilidade em vez de nomeá-la.
+
+**O conserto certo não é TTL.** A chave deveria ser
+`(cliente, sessão-de-digitação)`, com o front mandando um identificador de sessão
+num cabeçalho. Aí não há *staleness* entre sessões, não há relógio na conta, e o
+nome do recurso passa a descrever o que ele faz. Isso exige mudança de contrato
+com o cliente, e por isso é proposta e não entrega.
+
+**O que fica entregue:** a implementação, os sete testes com relógio injetado, as
+três métricas, e o argumento de produção escrito. Ligar é uma linha, e a
+consequência está declarada ao lado dela.
+
+**O problema.** O perfil é lido a cada tecla. Quem digita "financiamento" gasta
+doze teclas a partir de dois caracteres, e são doze leituras do mesmo dado — que
+não muda entre a primeira e a última, porque quem o produz roda a cada 15
+segundos, fora da requisição. Medido: **12 teclas, 1 leitura de perfil.**
+
+**O que ele não ganha hoje: nada em latência.** O perfil mora num
+`ConcurrentHashMap` neste processo, e ler mapa local não custa o bastante para
+medir. O ganho de custo é na forma de produção, onde a porta vai a um DynamoDB.
+Isso está escrito no javadoc e no `application.properties` porque, sem isso,
+alguém liga o cache, não vê diferença no p99 e conclui que o recurso não serve.
+
+**O que ele ganha hoje, e não é custo: estabilidade.** A agregação reescreve
+perfis a cada 15 segundos. Uma rodada que caia no meio da digitação pode
+reordenar a lista por um motivo sem relação nenhuma com a letra que a pessoa
+acabou de digitar — afinidade recalculada, fadiga nova, tendência que cruzou o
+piso. Com um instantâneo por sessão, "digitei uma letra e a lista embaralhou"
+deixa de ser possível. É o tipo de defeito que não gera ticket e corrói confiança.
+
+**A invalidação por escrita foi recusada, e é a decisão interessante.** Seria
+fácil: o decorador implementaria `EscritorDePerfil` também e derrubaria a chave de
+cada cliente que a agregação tocou. Mas isso **desfaz o segundo benefício para
+melhorar um terceiro que ninguém pediu** — a invalidação devolve exatamente a
+reordenação no meio da digitação que o cache existe para impedir.
+
+O preço de não invalidar é declarado: um clique agora não zera a fadiga até o TTL
+vencer. Com cinco segundos contra sinais de janela de 30 e 90 dias, é
+indistinguível de zero. Consistência dentro de uma sessão vale mais que
+reatividade de 200 ms num sinal medido em semanas.
+
+**Expira por escrita, não por acesso.** Por acesso, quem digita sem parar
+renovaria a entrada indefinidamente, e o limite deixaria de ser "uma sessão de
+digitação" para ser "enquanto ela digitar".
+
+**E o teto do TTL é código, não conselho.** Trinta segundos, verificados no
+construtor de `SugestaoProperties.CacheDePerfil`: acima disso a aplicação recusa
+subir. Um TTL de minutos esconderia a agregação, e o sistema continuaria
+aprendendo e pararia de usar o que aprendeu **sem erro em lugar nenhum**. É a
+mesma classe de defeito da decisão 24 — invariante documentada sem implementação
+—, e aqui ela virou validação em vez de parágrafo.
+
+**Falha não é guardada.** Quando o delegado lança, o Caffeine propaga e não grava:
+o caso de uso continua recebendo a falha, convertendo em `Colheita.FALHOU` e
+devolvendo lista degradada. Um cache que memorizasse a falha transformaria um
+soluço de rede em segundos de lista degradada para a mesma pessoa.
+
+**`@Primary` é necessário e não é decoração.** `PerfisEmMemoria` implementa as
+duas portas, então passam a existir dois beans do tipo `RepositorioDePerfil`. A
+anotação diz qual é a porta de **leitura** do sistema; a de escrita continua
+apontando direto para o adaptador, sem passar por cache nenhum — e é daí que vem o
+comportamento descrito acima, não de um efeito colateral da fiação.
+
+---
+
+## 28. Medir a ordem, e o entregável ser o portão
+
+A decisão 16 construiu a medição antes de mexer no ranking, e estava certa sobre
+quase tudo. Faltava uma coisa: **nenhuma das métricas mede ordem.** Taxa de
+zero-resultado, desfecho, posição clicada e motivo de descarte dizem quantas
+buscas encontram algo e por que as outras não. Nenhuma diz se as oito linhas estão
+na ordem certa — e são onze números calibrados à mão que decidem isso.
+
+**O entregável não é o NDCG, é o portão.** Um número medido uma vez é curiosidade.
+`scripts\avaliar-ranking.ps1` sai com código 1 quando a média cai mais que a
+tolerância, e é isso que permite mexer nos pesos. Sem ele, mexer é fé — e no
+escuro ninguém mexe, então o ranking congela.
+
+**Bate no endpoint, não no índice.** Mede `qf` e `boost` do Solr, Peneira,
+Rankeador, Misturador e Recuperador, tudo junto. Isso importa: uma lista que
+remove corretamente uma oferta inelegível e põe um artigo no lugar **é** a lista
+melhor, e só o endpoint sabe disso.
+
+**Ganho exponencial, e não linear.** `2^nota - 1`: a nota 3 vale sete e a nota 1
+vale um. Trocar o primeiro lugar por um vizinho de nota 2 derruba o NDCG para
+0,834 — visível. Com ganho linear a mesma troca quase não apareceria, e o portão
+deixaria de ver justamente a regressão que mais importa.
+
+**IDCG zero devolve `n/a`, nunca 1,0.** Consulta sem nada julgado sai da média em
+vez de entrar como acerto perfeito. Devolver 1,0 faria um conjunto envelhecido —
+termos renomeados no catálogo — fazer a média **subir** enquanto a cobertura
+desaba.
+
+**Há tolerância num teste determinístico, e o índice é o motivo.** O `boost` tem
+`recip(ms(NOW/HOUR, visto_em_dt), ...)`. O `NOW/HOUR` existe para a chave do cache
+de filtro ser estável *dentro* da hora, e a consequência é que o score muda na
+virada dela. Tolerância zero produziria um portão que fecha sozinho de hora em
+hora.
+
+**O autoteste existe porque avaliador com a conta errada é pior que avaliador
+nenhum**: ele produz um número, e ninguém desconfia de número. Seis casos
+calculados à mão, sem rede e sem índice.
+
+**E duas consultas carregam defeito conhecido de propósito.** `veiculos` guarda
+dois: o plural só alcança o documento pela tolerância a erro de digitação — não há
+*stemmer* de português, e a tolerância está fazendo o trabalho de um — e nenhum
+perfil tem elegibilidade de `FINANCIAMENTO_VEICULO`. Um conjunto de avaliação que
+só contém casos que passam não mede nada. O número sobe quando o dado for
+corrigido, **e é assim que se descobre que foi.**
+
+O limite que importa declarar: **NDCG não mede personalização.** Uma pessoa não
+tem como julgar o que *este* cliente quer, então afinidade, tendência e fadiga
+continuam sem medição de qualidade. São os dois rankings do desenho outra vez, e
+só um deles é mensurável offline.
+
+---
+
 ## Limites conhecidos, declarados
 
 Sem número: não é uma decisão, é uma lista viva que encolhe conforme as coisas
 são resolvidas. Nenhum destes é descuido — estão aqui para não virarem surpresa.
+
+**A posição da etapa de recuperação é estrutural, e o tipo não a protege.** A
+linha substituta carrega `Procedencia.CATALOGO`, que é a resposta certa para a
+pergunta de privacidade — não há comportamento de ninguém ali — e a resposta
+errada para `temScoreDoIndice()`: ela nunca foi pontuada pelo índice, e a
+relevância dela nasce zero para dizer isso. Hoje não tem efeito, porque a
+substituta entra **depois** do `Rankeador` e nasce sem gatilho. Mas se alguém
+mover a etapa para antes, a normalização de escala vai tratar aquele zero como
+score de Solr.
+
+É a mesma conflação que `Procedencia` existe para desfazer, e acrescentar um
+valor novo ao enum resolveria o tipo reintroduzindo a conflação pelo outro lado
+— misturar *de onde o dado veio* com *se ele foi pontuado*. Fica declarado, com
+o javadoc do `Recuperador` apontando para cá, em vez de contornado por um valor
+de enum que ninguém usa.
+
+**O cache de perfil é incompatível com o gatilho manual de aprendizado.** Ver
+decisão 27: não é defeito de nenhum dos dois, são propósitos opostos. O default
+desligado e o portão em `verificar-comportamento.ps1` contêm o problema; o
+conserto de verdade é chavear por sessão de digitação em vez de por tempo, e isso
+exige um cabeçalho novo no contrato com o cliente.
 
 **~~Não há autorização em `POST /v1/ofertas`.~~** Resolvido na decisão 14: o
 token carrega a jornada e o caso de uso confere o corpo contra ela.
@@ -1087,35 +1317,43 @@ buraco que o `CONSIGNADO` já teve. O conserto não é dar a elegibilidade: é u
 **teste** que falhe quando existir oferta no índice que nenhum perfil alcança, para
 isso parar de ser descoberta manual. Ainda não escrito.
 
-**Não há produto substituto.** Quem busca financiamento, é elegível a empréstimo e
-consignado, e recebe zero oferta, continua recebendo zero. Foi levantado,
-analisado, e deixado de fora desta rodada porque a decisão é de produto — oferecer
-substituto é aceitável neste contexto? — e não de engenharia.
+**Não há produto substituto.** ~~Quem busca financiamento, é elegível a empréstimo
+e consignado, e recebe zero oferta, continua recebendo zero.~~ **Resolvido**, e a
+solução ficou diferente do que esta linha supunha.
 
-**O `Content-Type` de sucesso e de erro discordam sobre charset.** O caminho de
-erro devolve `application/problem+json;charset=UTF-8` — escrito à mão em
-`ConfiguracaoDeSeguranca` e no `TratadorDeErros`. O de sucesso devolve
-`application/json` puro, que é o padrão do Spring.
+A objeção que tinha mantido o item fora era de produto: *oferecer substituto é
+aceitável neste contexto?* Ela continua de pé para a leitura original — trocar
+uma oferta por **outra oferta** que a pessoa também não pode contratar só move o
+problema, e por isso o construtor de `Substituto` recusa restrição e produto
+alvo. O que entrou é mais estreito e não tem essa objeção: a linha
+**não-condicional da jornada** — simular, conhecer, ajuda.
 
-**Os dois estão defensáveis; a inconsistência não.** A
-[RFC 8259](https://www.rfc-editor.org/rfc/rfc8259) define JSON como UTF-8 e **não**
-define parâmetro de charset para `application/json`, então o Spring está certo em
-omitir e um cliente correto assume UTF-8.
+E o que tornou isso barato é que **o sistema já calculava a informação necessária
+e a jogava fora**: o `Descarte` carrega jornada e motivo, e em produção o rastro
+inteiro é descartado porque a explicação fica desligada. Ver `Recuperador` para as
+quatro regras, e em especial para a que é de privacidade: **a linha depende da
+jornada, nunca do motivo** — as quatro razões de remoção produzem resposta
+idêntica, e termo barrado pelo piso de k-anonimato não gera substituta nenhuma,
+porque a própria linha seria o vazamento.
 
-O problema é que cliente legado não assume. O `Invoke-RestMethod` do PowerShell
-5.1 cai para ISO-8859-1 quando falta charset, e `crédito consignado` chega como
-`crÃ©dito consignado` **na string em memória** — não é artefato de console. O mesmo
-vale para .NET Framework antigo e para algumas bibliotecas Java anteriores.
-Descoberto escrevendo o roteiro de demonstração, que mostraria isso na tela.
+**O `Content-Type` de sucesso e de erro discordam sobre charset.** **Resolvido**,
+e a recomendação deste documento foi a que entrou — `;charset=UTF-8` no sucesso,
+em `ConfiguracaoWeb.extendMessageConverters`, num lugar só em vez de `produces`
+em seis rotas. O defeito original foi exatamente este: alguém declarou no caminho
+de erro e não no de sucesso.
 
-Por ora o conserto ficou no cliente — `requisicoes/demonstrar.ps1` decodifica os
-bytes à mão — porque mudar o servidor exige mexer em negociação de conteúdo, e isso
-não se faz na véspera de apresentar. A decisão pendente é qual lado uniformizar:
-acrescentar `;charset=UTF-8` ao sucesso (custo semântico zero, e poupa todo
-consumidor legado de descobrir isso sozinho) ou remover do erro, ficando
-estritamente com a RFC. **A primeira é a que eu recomendaria**, pelo mesmo
-raciocínio das outras decisões deste documento: o custo de ser generoso é zero, e o
-custo de não ser cai sobre quem integra.
+O registro de como ele saiu da gaveta vale mais que o conserto. Este documento
+dizia que o `Invoke-RestMethod` do PowerShell 5.1 cai para ISO-8859-1 e que
+`crédito consignado` chegaria como `crÃ©dito consignado` **na string em memória**.
+Era previsão. Ela se confirmou de forma inconveniente: o **avaliador de ranking**,
+escrito depois, media **zero** em toda consulta cujo melhor resultado tem acento —
+`renegoci`, `poupanca`, `cet`, `antecip` — porque o termo julgado nunca casava com
+o termo devolvido. A média saltou de **0,5609 para 0,8906** ao decodificar os
+bytes à mão, antes de qualquer mudança de relevância.
+
+A lição que fica: a inconsistência era "cosmética" só enquanto nenhum cliente
+dependia dela. O primeiro que apareceu não deu erro — deu um número **plausível e
+errado**, que é a pior forma de falhar que existe.
 
 **A afinidade não distingue clique de arrepender.** Clicar e voltar em dois
 segundos conta igual a clicar e contratar — o `SUGESTAO_CLICADA` não tem duração

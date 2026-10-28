@@ -16,7 +16,7 @@ motivo de cada ausência registrado.
 | **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 36 requisições em 7 pastas |
-| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 25 decisões, com o que foi **recusado** e por quê |
+| entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 28 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 | ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
@@ -123,6 +123,46 @@ Saúde em <http://localhost:8080/actuator/health>, painel do Solr em
 > front-end. O perfil padrão não liga nada disso — o default que viaja no
 > repositório é o seguro, e ligar é decisão de quem roda.
 
+> **Se a busca devolver 500, rode `.\mvnw clean` antes de acusar o código.** A
+> rota de busca não tem caminho de erro — um 500 ali significa quase sempre
+> `target/` em estado inconsistente, e não defeito. Já aconteceu aqui: alternar
+> entre `mvnw test` e `mvnw spring-boot:run` deixou uma classe externa
+> recompilada apontando para uma classe sintética (`...CasoDeUso$1`, a tabela de
+> `switch` sobre enum) que a compilação incremental não regravou. O sintoma é
+> `NoClassDefFoundError` em **toda** busca, com a suíte de testes passando — o
+> que manda investigar exatamente o lugar errado.
+
+### No VSCode
+
+O repositório traz `.vscode/launch.json` e `.vscode/tasks.json`. Com o
+[Extension Pack for Java](https://marketplace.visualstudio.com/items?itemName=vscjava.vscode-java-pack)
+instalado, **F5** sobe a API já no perfil `local`, e `Ctrl+Shift+P → Run Task`
+dá a suíte, o Solr, o portão de NDCG, as duas collections do newman e a limpeza
+do índice. O `.vscode/extensions.json` recomenda também o
+**REST Client** — sem ele, `requisicoes/sugestoes.http` abre como texto morto.
+
+Falta uma coisa, e ela é da sua máquina: o caminho do JDK 25. Crie
+`.vscode/settings.json`, que é ignorado pelo git justamente por isso:
+
+```json
+{
+  "java.jdt.ls.java.home": "C:\\caminho\\para\\jdk-25",
+  "java.configuration.runtimes": [
+    { "name": "JavaSE-25", "path": "C:\\caminho\\para\\jdk-25", "default": true }
+  ],
+  "terminal.integrated.env.windows": { "JAVA_HOME": "C:\\caminho\\para\\jdk-25" }
+}
+```
+
+> **O sintoma de esquecer isso engana.** Com `JAVA_HOME` num JDK mais antigo, o
+> surefire falha com *"class file version 69.0 … only recognizes up to 61.0"*
+> **apontando para uma classe de teste** — 69 é Java 25 e 61 é Java 17. Parece
+> defeito de código, e é só o JDK errado rodando classes já compiladas.
+
+> **O segredo não entra em arquivo nenhum.** O `launch.json` lê
+> `${env:SUGESTAO_SEGREDO}` do ambiente, que o VSCode herda **ao abrir**: se você
+> criou a variável depois, feche e reabra o VSCode, não só o terminal.
+
 ### Oito perfis para experimentar
 
 A demonstração vem com oito clientes falsos, cada um exercitando uma parte
@@ -195,14 +235,15 @@ Três coisas que poupam tempo de quem integra:
 [`docs/guia-api.md`](docs/guia-api.md)** — com o contrato de eventos, o cadastro de
 oferta, a tabela de códigos e a lista de armadilhas de front-end.
 
-### Quatro formas de bater nos endpoints
+### Cinco formas de bater nos endpoints
 
 | forma | para quê |
 |---|---|
 | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) | **comece aqui**: 36 requisições em 7 pastas, para clicar e ler |
 | [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) | REST Client do VS Code, agrupado por pergunta |
 | [`requisicoes/bater.ps1`](requisicoes/bater.ps1) | terminal, sem extensão nenhuma |
-| [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json) | newman, 56 asserções — para CI |
+| [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json) | newman, 56 asserções sobre o **cadastro** — para CI |
+| [`requisicoes/postman-front-typeahead.json`](requisicoes/postman-front-typeahead.json) | newman, 160 asserções sobre o **consumo**: uma sessão de digitação |
 
 A collection de exploração assina os próprios tokens; só cole o seu
 `SUGESTAO_SEGREDO` na variável `segredo`.
@@ -214,7 +255,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 | documento | o que responde |
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
-| [`docs/decisoes.md`](docs/decisoes.md) | 25 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/decisoes.md`](docs/decisoes.md) | 28 decisões de desenho, com o que foi **recusado** e por quê |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
@@ -325,6 +366,33 @@ npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json
 As asserções não dependem do `?explicar=true`: elas conferem o que qualquer
 cliente recebe. Esta é a collection a **não** abrir para explorar — ela escolhe o
 token pelo **número** no nome da requisição, e renomear uma quebra o token dela.
+
+**No newman, simulando um front** —
+[`requisicoes/postman-front-typeahead.json`](requisicoes/postman-front-typeahead.json),
+com **160 asserções**. A de cima exercita o *cadastro*; esta exercita o
+*consumo*: uma pessoa digitando `e`, `em`, `emp`… até `emprestimo`, o app
+renderizando, registrando o que mostrou, registrando o toque.
+
+```powershell
+npx --yes newman@6 run .\requisicoes\postman-front-typeahead.json `
+    --env-var segredo="$env:SUGESTAO_SEGREDO"
+```
+
+**As invariantes universais estão no `test` da collection, não repetidas em cada
+requisição.** Nove afirmações rodam depois de *toda* resposta `200` da rota de
+busca, e nenhuma entrada pode quebrá-las — `posicao` sem furo, `destino` sempre
+relativo, ordem monótona exceto a linha de evento, `melhorOferta` apontando para
+um item que de fato é oferta, cabeçalhos de limite de taxa presentes. Um front
+escrito contra esta API pode confiar nelas sem ler o código do servidor.
+
+> **Por que isso não é mais um teste JUnit.** Os 200 testes provam o domínio e o
+> caso de uso, e nenhum deles passa por HTTP de verdade — é no HTTP que mora o
+> que o front enxerga. O defeito de charset deste repositório é a prova: **todo
+> teste JUnit passava, e todo termo acentuado chegava ilegível ao cliente.**
+>
+> E esta collection tem dentes: rodada contra o commit anterior, ela falha **19
+> vezes** — treze no charset e seis na lista resgatada. Suíte que passa na versão
+> quebrada não prova nada.
 
 **No terminal** — [`requisicoes/bater.ps1`](requisicoes/bater.ps1), sem precisar de
 extensão nenhuma. Ele resume a resposta no que importa para cada pergunta:
@@ -688,16 +756,20 @@ curl.exe -s "http://localhost:8080/actuator/metrics/sugestao.buscas" -H "Authori
 |---|---|
 | `sugestao.buscas` | desfecho, faixa de prefixo, estado do perfil, jornada |
 | `sugestao.descartes` | **por que** a lista veio curta, por motivo |
+| `sugestao.substitutas` | quantas listas vazias foram resgatadas, **por jornada** |
 | `sugestao.tolerancia` | quantas vezes a segunda consulta rodou, e se ganhou algo |
 | `sugestao.latencia` | p50/p95/p99 por etapa — total, índice, perfil |
 | `sugestao.posicao.clicada` | se o ranking acerta: massa em 0–1 ou em 3–4 |
+| `sugestao.perfil.cache.*` | acertos, erros e itens do cache de perfil — **só existem com ele ligado**, e o default é desligado (ver decisão 27) |
 
-O desfecho tem **quatro** valores, e o que faltava é o que esconde defeito:
+O desfecho tem **cinco** valores, e os dois últimos existem para não esconder
+defeito:
 
 ```
 PREFIXO_RECUSADO   nem era busca — alguém no meio da primeira letra
 ZERO_RESULTADO     buscou e não achou nada
-SEM_OFERTA         achou linhas, nenhuma acionável   ← este
+SUBSTITUIDA        ia vir vazia; uma linha de jornada a resgatou   ← novo
+SEM_OFERTA         achou linhas, nenhuma acionável                 ← este
 COM_OFERTA         achou oferta
 ```
 
@@ -706,6 +778,32 @@ COM_OFERTA         achou oferta
 zero-resultado, então nenhum contador de lista vazia acusaria; e não era sucesso,
 porque quem buscou financiamento não recebeu proposta nenhuma. Sem esse valor, o
 caso é invisível.
+
+`SUBSTITUIDA` existe para **não estragar o `SEM_OFERTA`**. A linha substituta
+nunca é oferta, então sem este valor toda busca resgatada cairia em `SEM_OFERTA`
+— e aí ele significaria duas coisas opostas: "achou conteúdo e nenhuma proposta"
+e "não achou nada e recebeu uma linha de consolo". E há uma propriedade que vale
+declarar: **`ZERO_RESULTADO + SUBSTITUIDA` é a taxa de zero-resultado de antes do
+recurso**, então a série histórica continua comparável — a soma mede cobertura de
+busca, que não mudou, e a separação mede quantas dessas falhas o resgate
+converteu em alguma coisa.
+
+### A ordem da lista, medida
+
+```powershell
+.\scripts\avaliar-ranking.ps1 -Autoteste   # a aritmetica, sem rede
+.\scripts\avaliar-ranking.ps1              # mede e compara com a linha de base
+```
+
+As métricas acima são de **processo**: dizem quantas buscas encontram algo e por
+que as outras não. Nenhuma delas mede **ordem**. O
+[avaliador de ranking](avaliacao/README.md) fecha esse buraco com NDCG@5 e
+NDCG@8 sobre um conjunto de julgamento versionado, e sai com código 1 quando a
+média cai — é passo de build, não relatório.
+
+Sem ele, os onze pesos calibrados à mão (`termo_prefixo^6`, `1,6`, `3,6`, `0,6`…)
+não têm como ser mexidos com evidência. **Medido hoje: NDCG@5 de 0,9116 em 32
+consultas.**
 
 E `prefixoAceito` separa **"não encontrou"** de **"nem era busca"**. As duas
 respondem lista vazia e são coisas opostas: a primeira é falha de cobertura e
@@ -1087,7 +1185,12 @@ requisicoes/sondar.ps1         55 sondas adversariais em 6 grupos
 requisicoes/verificar-comportamento.ps1   afinidade de produto e fadiga, ao vivo
 requisicoes/demonstrar.ps1     roteiro de apresentação em oito atos
 requisicoes/postman-exploracao.json       36 requisições em 7 pastas, para clicar
-requisicoes/postman-sugestao-busca.json   collection com 56 asserções (newman)
+requisicoes/postman-sugestao-busca.json   cadastro: 56 asserções (newman)
+requisicoes/postman-front-typeahead.json  consumo: 160 asserções, uma sessão de digitação
+
+avaliacao/julgamentos.json     32 consultas julgadas, para medir a ORDEM da lista
+avaliacao/linha-de-base.json   a medição de referência do portão de NDCG
+scripts/avaliar-ranking.ps1    NDCG@5 e @8, com autoteste e portão de regressão
 
 compose.yaml                   Solr 10 em container — escrito, nunca executado
 scripts/solr-local.ps1         Solr 10 do zip, sem container e sem admin
@@ -1328,10 +1431,15 @@ alcança, para isso parar de ser descoberta manual.
 
 ```powershell
 $env:JAVA_HOME = '<seu JDK 25>'
-.\mvnw test                                  # 174 testes
+.\mvnw test                                  # 200 testes
 .\scripts\cacar-flaky.ps1 -Rodadas 10        # caça teste instável sob carga
 .\requisicoes\sondar.ps1                     # 55 sondas adversariais
-npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json   # 56 asserções
+.\scripts\avaliar-ranking.ps1                # NDCG@5 — portão de regressão de ordem
+
+# os dois lados do contrato público, por HTTP de verdade
+npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json    # cadastro, 56
+npx --yes newman@6 run .\requisicoes\postman-front-typeahead.json `
+    --env-var segredo="$env:SUGESTAO_SEGREDO"                       # consumo, 160
 ```
 
 Duas convenções que valem saber antes de abrir um PR:

@@ -23,7 +23,30 @@ public enum Origem {
 
     /** O que gente de segmento e carteira parecidos busca. Vem do índice, e só
      *  depois do piso de k-anonimato. */
-    POPULAR(3);
+    POPULAR(3),
+
+    /**
+     * A linha de jornada que entra quando a peneira zerou a lista. Não vem do
+     * índice e não disputa posição com ninguém: ela só existe quando não há mais
+     * nada, e sai sozinha.
+     *
+     * <p>Tem origem própria em vez de se disfarçar de {@link #CATALOGO} por três
+     * motivos, e o terceiro é o que decidiu. Um: quem consome a resposta precisa
+     * saber que esta linha não casou com o que a pessoa digitou — ela casou com a
+     * <em>jornada</em> do que foi removido. Dois: a métrica de desfecho só
+     * consegue separar "recuperada" de "encontrou pouco" se a linha se declarar.
+     * Três: sem origem própria, a única forma de contar quantas vezes o recurso
+     * agiu seria inferir — e um recurso que se mede por inferência é um recurso
+     * que ninguém mede.
+     *
+     * <p>A prioridade é a mais fraca do conjunto e <strong>hoje não é
+     * exercida</strong>: a substituta entra depois do {@link Misturador}, então
+     * nunca passa pela deduplicação nem pelas cotas. O número está aqui para o
+     * dia em que isso mudar, e aponta para o lado seguro — perder a linha
+     * substituta numa colisão é o resultado certo, porque qualquer outra origem
+     * casou de verdade com o prefixo.
+     */
+    SUBSTITUTO(4);
 
     private final int prioridade;
 

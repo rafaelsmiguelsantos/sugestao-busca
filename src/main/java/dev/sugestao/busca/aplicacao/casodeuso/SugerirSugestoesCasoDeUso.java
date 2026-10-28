@@ -22,7 +22,9 @@ import dev.sugestao.busca.dominio.Peneira;
 import dev.sugestao.busca.dominio.Perfil;
 import dev.sugestao.busca.dominio.Prefixo;
 import dev.sugestao.busca.dominio.Rankeador;
+import dev.sugestao.busca.dominio.Recuperador;
 import dev.sugestao.busca.dominio.Restricoes;
+import dev.sugestao.busca.dominio.Substitutos;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -43,8 +45,10 @@ import java.util.function.Supplier;
  *
  * <p>A ordem das etapas é a do desenho e não é intercambiável: classificar o
  * evento precisa do perfil; a peneira precisa da classificação, porque o piso de
- * k-anonimato só vale para o que veio do índice; e a mistura precisa da peneira,
- * senão a cota seria gasta com linhas que iam ser removidas depois.
+ * k-anonimato só vale para o que veio do índice; a mistura precisa da peneira,
+ * senão a cota seria gasta com linhas que iam ser removidas depois; e a
+ * recuperação vem por último porque a condição dela — "a lista ficou vazia" — só
+ * é um fato depois da mistura.
  */
 public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
 
@@ -54,6 +58,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
     private final Peneira peneira;
     private final Rankeador rankeador;
     private final Misturador misturador;
+    private final Recuperador recuperador;
     private final ParametrosDeSugestao parametros;
     private final MedidorDeBusca medidor;
 
@@ -64,6 +69,7 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
             Peneira peneira,
             Rankeador rankeador,
             Misturador misturador,
+            Recuperador recuperador,
             ParametrosDeSugestao parametros,
             MedidorDeBusca medidor) {
         this.catalogo = catalogo;
@@ -72,6 +78,13 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         this.peneira = peneira;
         this.rankeador = rankeador;
         this.misturador = misturador;
+        // Sem recuperador declarado, nenhuma substituta: é o comportamento
+        // anterior ao recurso. Igual ao MedidorDeBusca.NULO, e pelo mesmo motivo
+        // — um Optional.empty() constante é mais honesto que um null a conferir
+        // em cada uso.
+        this.recuperador = recuperador == null
+                ? new Recuperador(Substitutos.NENHUM)
+                : recuperador;
         this.parametros = parametros;
         this.medidor = medidor == null ? MedidorDeBusca.NULO : medidor;
     }
@@ -172,20 +185,32 @@ public class SugerirSugestoesCasoDeUso implements SugerirSugestoes {
         var descartes = new ArrayList<Descarte>(peneirada.descartes());
         descartes.addAll(mistura.descartes());
 
+        // A recuperação vem aqui, com a lista já montada e os descartes já
+        // reunidos, e as duas condições importam.
+        //
+        // Com a lista montada, porque "está vazia" é a condição de disparo e só
+        // agora ela é verificável. Com os descartes reunidos, porque o motivo que
+        // autoriza a substituta pode ter vindo de qualquer uma das duas etapas —
+        // na prática vem sempre da peneira, já que mistura só descarta por cota e
+        // duplicação, mas depender disso seria depender de um detalhe de outra
+        // classe em vez da regra escrita em MotivoDeDescarte.
+        var escolhidos = new ArrayList<>(mistura.escolhidos());
+        recuperador.recuperar(escolhidos, descartes).ifPresent(escolhidos::add);
+
         // Degradada quando o perfil não chegou: a lista ainda é útil, mas é a
         // popular do segmento. O app usa isto para não registrar a impressão
         // como se fosse personalizada — senão a camada 4 aprenderia com ruído.
         boolean degradada = !perfil.conhecido();
 
         var lista = new ListaDeSugestoes(
-                mistura.escolhidos().stream().map(Candidato::paraSugestao).toList(),
+                escolhidos.stream().map(Candidato::paraSugestao).toList(),
                 degradada);
 
-        var linhas = new ArrayList<RastroDaSugestao.Linha>(mistura.escolhidos().size());
-        for (int i = 0; i < mistura.escolhidos().size(); i++) {
-            var c = mistura.escolhidos().get(i);
+        var linhas = new ArrayList<RastroDaSugestao.Linha>(escolhidos.size());
+        for (int i = 0; i < escolhidos.size(); i++) {
+            var c = escolhidos.get(i);
             linhas.add(new RastroDaSugestao.Linha(
-                    i, c.ofertaId(), c.termo(), c.origem(), c.relevancia(),
+                    i, c.ofertaId(), c.termo(), c.jornada(), c.origem(), c.relevancia(),
                     // A fadiga vai para o rastro separada da relevância, e não
                     // embutida nela. É o que cumpre a invariante declarada ao
                     // quebrar o "os sinais só promovem" do Rankeador: todo

@@ -181,12 +181,18 @@ outro prefixo: a ausência é a resposta.
 | `HISTORICO` | o que esta pessoa já buscou | ícone de relógio |
 | `CATALOGO` | oferta curada ou cadastrada por uma jornada | a linha que carrega `ofertaId` |
 | `POPULAR` | o que gente de coorte parecida busca | sugestão de texto, sem produto |
+| `SUBSTITUTO` | a lista ia vir **vazia** e esta linha a resgatou | caminho da jornada: simular, conhecer, ajuda |
+
+> **`SUBSTITUTO` nunca é oferta.** Ela vem sem `ofertaId` e sem `produtoAlvo`, e
+> por isso `melhorOferta` continua ausente. Ela também **não casou com o que a
+> pessoa digitou** — casou com a *jornada* do que foi removido. Se o seu app
+> mostra essas linhas de outro jeito, é por esta origem que ele decide.
 
 ---
 
 ## 04 · O que acontece por dentro
 
-Entre o `GET` e a resposta há cinco etapas, e a ordem não é intercambiável. O
+Entre o `GET` e a resposta há seis etapas, e a ordem não é intercambiável. O
 orçamento inteiro é de 30 ms, contado do início da requisição.
 
 | etapa | o que faz | custo |
@@ -196,11 +202,29 @@ orçamento inteiro é de 30 ms, contado do início da requisição.
 | **Peneira** | O perfil remove o que o cliente não pode contratar — e registra o motivo. **Booleano, não peso.** | ~2 ms |
 | **Ranquear** | Normaliza a escala, elege a jornada líder, aplica o comportamento desta pessoa. | CPU |
 | **Misturar** | Deduplica, reserva a linha do evento, respeita a cota do histórico, corta no limite. | CPU |
+| **Recuperar** | Só quando a lista ficou **vazia** e o motivo foi uma condição desta pessoa: entra uma linha da jornada. | CPU |
 
 > **Elegibilidade não é nota baixa — é remoção.** Se fosse peso, um prefixo muito
 > casado faria a oferta vetada subir de volta. Então a melhor oferta não é a de
 > maior nota: é a de maior nota *entre as que sobreviveram aos portões*, e os
 > portões vêm antes.
+
+> **A remoção está certa; a lista vazia era o defeito.** Cliente novo digita
+> `veiculos`, a busca acha "financiamento de veículo", a peneira o remove por
+> elegibilidade — e a resposta era nada. A etapa **Recuperar** devolve uma linha
+> da jornada no lugar, e ela tem três limites que valem conhecer:
+>
+> - **Só com a lista vazia.** Não completa lista curta: uma linha boa mais uma de
+>   ajuda é pior que uma linha boa.
+> - **Só por condição desta pessoa** — elegibilidade, inadimplência, conta não
+>   operante, produto já contratado. Prefixo que não casou com nada **continua
+>   devolvendo vazio**, porque não há jornada a oferecer e a taxa de
+>   zero-resultado é a métrica que não se pode mascarar.
+> - **A linha depende da jornada, nunca do motivo.** As quatro razões produzem a
+>   mesma resposta, e nenhuma delas é distinguível de fora. É o que impede o
+>   resgate de contar, por omissão, o que a peneira decidiu sobre a pessoa. Pelo
+>   mesmo motivo, termo barrado pelo **piso de k-anonimato não gera substituta** —
+>   a própria linha seria o vazamento.
 
 ### A conta do ranking
 
@@ -540,11 +564,25 @@ p50 de 8–10 ms e p99 da ordem de 30 ms; entre 530 e 680 req/s com 40 chamadas
 falha, em 400 requisições. Cliente, serviço e índice na mesma máquina — serve para
 comparar mudanças, **não para dimensionar capacidade**.
 
-Verificado: 174 testes de unidade, 56 asserções de contrato e 55 sondas
-adversariais, mais um caçador de teste instável que roda a suíte sob contenção de
-CPU ([`scripts/cacar-flaky.ps1`](../scripts/cacar-flaky.ps1)). Três asserções deste
+Verificado: 200 testes de unidade; **216 asserções de contrato por HTTP de
+verdade** — 56 sobre o cadastro
+([`postman-sugestao-busca.json`](../requisicoes/postman-sugestao-busca.json)) e
+160 sobre o consumo
+([`postman-front-typeahead.json`](../requisicoes/postman-front-typeahead.json),
+uma sessão de digitação); 55 sondas adversariais; e **NDCG@5 de 0,9116** em 32
+consultas julgadas ([`avaliacao/`](../avaliacao/README.md)), que é a única medida
+de *ordem* do projeto.
+
+Mais um caçador de teste instável que roda a suíte sob contenção de CPU
+([`scripts/cacar-flaky.ps1`](../scripts/cacar-flaky.ps1)). Três asserções deste
 projeto afirmavam igualdade exata sobre valor decaído e passavam por sorte; a última
 só apareceu com os doze núcleos ocupados.
+
+> **Por que as asserções de HTTP não são mais testes de unidade.** Os 200 provam o
+> domínio e o caso de uso, e nenhum deles passa por HTTP — é no HTTP que mora o
+> que o cliente enxerga. O defeito de `charset` deste repositório é a prova: todo
+> teste de unidade passava, e todo termo acentuado chegava ilegível a quem
+> integrava.
 
 O raciocínio por trás de cada decisão, com o que foi recusado e por quê, está em
 [`decisoes.md`](decisoes.md).

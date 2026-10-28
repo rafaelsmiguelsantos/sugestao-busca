@@ -16,11 +16,15 @@ import dev.sugestao.busca.dominio.MotivoDeDescarte;
 import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Origem;
 import dev.sugestao.busca.dominio.Peneira;
+import dev.sugestao.busca.dominio.Procedencia;
 import dev.sugestao.busca.dominio.Rankeador;
+import dev.sugestao.busca.dominio.Recuperador;
 import dev.sugestao.busca.dominio.Perfil;
 import dev.sugestao.busca.dominio.Restricoes;
 import dev.sugestao.busca.dominio.Segmento;
 import dev.sugestao.busca.dominio.SituacaoDaConta;
+import dev.sugestao.busca.dominio.Substituto;
+import dev.sugestao.busca.dominio.Substitutos;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -226,6 +230,128 @@ class SugerirSugestoesCasoDeUsoTest {
     }
 
     // -----------------------------------------------------------------------
+    // A linha substituta. Ver Recuperador.
+    // -----------------------------------------------------------------------
+
+    @Test
+    @DisplayName("oferta removida por elegibilidade devolve a linha da jornada em vez de lista vazia")
+    void recuperaListaZeradaPelaPeneira() {
+        // É o caso medido contra o índice real: cliente novo digita "veiculos",
+        // a busca encontra "financiamento de veículo", e a peneira o remove —
+        // com razão. Antes disto, a resposta era lista vazia.
+        var financiamento = new Candidato("OFR-CREDITO-FIN-VEICULO", "financiamento de veículo",
+                "", "/app/credito/financiamento-de-veiculo", "credito", "FINANCIAMENTO_VEICULO",
+                new Restricoes(true, true, false), List.of(), 0, 3.2,
+                Origem.CATALOGO, Procedencia.CATALOGO);
+
+        var caso = montar(
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(financiamento)),
+                id -> Perfil.NEUTRO,
+                PARAMETROS,
+                comSubstitutaDeCredito());
+
+        var resultado = caso.executar(new ConsultaDeSugestao("veiculos", CLIENTE));
+        var lista = resultado.lista();
+
+        assertThat(lista.itens()).singleElement().satisfies(item -> {
+            assertThat(item.termo()).isEqualTo("simular credito");
+            assertThat(item.origem()).isEqualTo(Origem.SUBSTITUTO);
+            assertThat(item.jornada()).isEqualTo("credito");
+
+            // Nunca é oferta: sem identificador e sem produto, a jornada
+            // consumidora não recebe um identificador que ela não tem como
+            // acionar.
+            assertThat(item.ehOferta()).isFalse();
+        });
+
+        assertThat(lista.melhorOferta()).isEmpty();
+
+        var rastro = resultado.rastro();
+        assertThat(rastro.substituida()).isTrue();
+        assertThat(rastro.jornadaSubstituta()).isEqualTo("credito");
+
+        // E não é zero-resultado: a busca foi atendida e entregou uma linha.
+        assertThat(rastro.zeroResultado()).isFalse();
+    }
+
+    @Test
+    @DisplayName("lista vazia porque nada casou continua vazia: não há jornada a oferecer")
+    void naoInventaLinhaQuandoNadaCasou() {
+        // A regra que mantém o recurso honesto. Sem ela, qualquer prefixo sem
+        // resultado passaria a devolver uma linha de ajuda qualquer — e aí o
+        // recurso deixaria de resgatar busca e passaria a mascarar falha de
+        // cobertura, que é a métrica mais importante do projeto.
+        var caso = montar(
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of()),
+                id -> Perfil.NEUTRO,
+                PARAMETROS,
+                comSubstitutaDeCredito());
+
+        var resultado = caso.executar(new ConsultaDeSugestao("xpto", CLIENTE));
+
+        assertThat(resultado.lista().itens()).isEmpty();
+        assertThat(resultado.rastro().substituida()).isFalse();
+        assertThat(resultado.rastro().zeroResultado()).isTrue();
+    }
+
+    @Test
+    @DisplayName("termo barrado pelo piso de k-anonimato não gera substituta — a linha seria o vazamento")
+    void pisoDeKAnonimatoNaoGeraSubstituta() {
+        // A exclusão que mais importa em MotivoDeDescarte.condicionalDoCliente().
+        // Se o piso gerasse substituta, a presença da linha informaria que ALGO
+        // casou com aquele prefixo — e esconder exatamente isso é a única coisa
+        // que o piso faz.
+        //
+        // A jornada 'credito' num termo de log é artificial: na prática o log
+        // publica tudo em Jornada.AUSENTE, e com isso a substituta nem seria
+        // procurada. Está assim de propósito, para o teste medir a regra do
+        // motivo e não um efeito colateral do dado.
+        var abaixoDoPiso = new Candidato("", "antecipar limite da maria", "", "/busca",
+                "credito", "", Restricoes.NENHUMA, List.of(), 4, 1.0,
+                Origem.POPULAR, Procedencia.LOG);
+
+        var caso = montar(
+                (prefixo, segmento, limite) -> CatalogoDeSugestoes.Busca.exata(List.of(abaixoDoPiso)),
+                id -> Perfil.NEUTRO,
+                PARAMETROS,
+                comSubstitutaDeCredito());
+
+        var resultado = caso.executar(new ConsultaDeSugestao("ante", CLIENTE));
+
+        assertThat(resultado.lista().itens()).isEmpty();
+        assertThat(resultado.rastro().substituida()).isFalse();
+    }
+
+    @Test
+    @DisplayName("a substituta não completa lista curta: ela só entra quando não sobrou nada")
+    void naoCompletaListaCurta() {
+        var umaLinhaBoa = popular("antecipação de limite");
+        var removida = new Candidato("OFR-CREDITO-CONSIGNADO", "crédito consignado", "",
+                "/app/credito/consignado", "credito", "CONSIGNADO",
+                new Restricoes(true, false, false), List.of(), 0, 1.0,
+                Origem.CATALOGO, Procedencia.CATALOGO);
+
+        var caso = montar(
+                (prefixo, segmento, limite) ->
+                        CatalogoDeSugestoes.Busca.exata(List.of(umaLinhaBoa, removida)),
+                id -> Perfil.NEUTRO,
+                PARAMETROS,
+                comSubstitutaDeCredito());
+
+        var lista = caso.executar(new ConsultaDeSugestao("ante", CLIENTE)).lista();
+
+        // Uma linha boa mais uma de ajuda é uma lista pior que uma linha boa: a
+        // segunda rouba atenção de quem já tinha o que queria.
+        assertThat(lista.itens()).extracting(s -> s.termo()).containsExactly("antecipação de limite");
+    }
+
+    private static Recuperador comSubstitutaDeCredito() {
+        return new Recuperador(new Substitutos(List.of(
+                new Substituto("credito", "simular credito", "Veja as condicoes e simule",
+                        "/app/credito/simular"))));
+    }
+
+    // -----------------------------------------------------------------------
 
     private SugerirSugestoesCasoDeUso montar(CatalogoDeSugestoes catalogo, RepositorioDePerfil perfis) {
         return montar(catalogo, perfis, PARAMETROS);
@@ -233,9 +359,17 @@ class SugerirSugestoesCasoDeUsoTest {
 
     private SugerirSugestoesCasoDeUso montar(
             CatalogoDeSugestoes catalogo, RepositorioDePerfil perfis, ParametrosDeSugestao parametros) {
+        // Sem substitutas: é o comportamento anterior ao Recuperador, e é o que
+        // todos os testes acima estão medindo.
+        return montar(catalogo, perfis, parametros, new Recuperador(Substitutos.NENHUM));
+    }
+
+    private SugerirSugestoesCasoDeUso montar(
+            CatalogoDeSugestoes catalogo, RepositorioDePerfil perfis,
+            ParametrosDeSugestao parametros, Recuperador recuperador) {
         return new SugerirSugestoesCasoDeUso(
                 catalogo, perfis, new ClassificadorDeOrigem(), new Peneira(30),
-                new Rankeador(), new Misturador(), parametros, MedidorDeBusca.NULO);
+                new Rankeador(), new Misturador(), recuperador, parametros, MedidorDeBusca.NULO);
     }
 
     private static Candidato popular(String termo) {

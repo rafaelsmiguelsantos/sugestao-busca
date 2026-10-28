@@ -64,6 +64,12 @@ public record SugestaoProperties(
         /* Medicao da qualidade da busca. Ver MedidorDeBusca. */
         Medicao medicao,
 
+        /* Linha substituta quando a peneira zera a lista. Ver Recuperador. */
+        Recuperacao recuperacao,
+
+        /* Cache do perfil por sessao de digitacao. Ver PerfisComCache. */
+        CacheDePerfil cacheDePerfil,
+
         /* Limite de taxa na rota de digitacao. Ver LimitadorDeTaxa. */
         LimiteDeTaxa limiteDeTaxa) {
 
@@ -96,6 +102,111 @@ public record SugestaoProperties(
 
         public static Medicao padrao() {
             return new Medicao(true);
+        }
+    }
+
+    /**
+     * A linha que resgata a lista vazia, e as jornadas que a declararam.
+     *
+     * <p>O interruptor e o conteúdo são campos separados, e nenhum dos dois é
+     * suficiente sozinho. Ligado com lista vazia não faz nada — e isso é de
+     * propósito: o gate de verdade é o conteúdo, porque declarar a linha de uma
+     * jornada é decisão de quem conhece a jornada, não de quem edita
+     * configuração. O interruptor existe para desligar o recurso inteiro num
+     * incidente sem ter de apagar o conteúdo e lembrar de repô-lo depois.
+     *
+     * <p><strong>{@code Boolean} e não {@code boolean}, pela mesma razão da
+     * decisão 6.</strong> Com o primitivo, ausente e {@code false} são
+     * indistinguíveis — e quem declarasse {@code linhas[0]} sem lembrar do
+     * interruptor teria o recurso <em>desligado em silêncio</em>, com o conteúdo
+     * no arquivo e nenhuma linha na tela. É o pior modo de falha de
+     * configuração: parece configurado e não está. Ausente aqui significa "não
+     * opinei", e a opinião padrão é ligado, igual ao disjuntor e à tolerância.
+     *
+     * <p><strong>Por que o conteúdo mora aqui e não no índice.</strong> Ele é
+     * lido no caminho de 30 ms, exatamente quando a busca já falhou, e por isso
+     * precisa estar em memória — ver {@code Substitutos}, que explica por que
+     * isto não é uma porta. Em produção o carregamento vem do catálogo na subida;
+     * o que não muda é que nada aqui vai à rede durante a requisição.
+     */
+    public record Recuperacao(Boolean habilitada, List<LinhaSubstituta> linhas) {
+
+        public Recuperacao {
+            linhas = linhas == null ? List.of() : List.copyOf(linhas);
+            habilitada = habilitada == null ? Boolean.TRUE : habilitada;
+        }
+
+        public static Recuperacao padrao() {
+            // Ligada e sem conteúdo: o comportamento é idêntico ao de antes do
+            // recurso, e quem quiser o recurso declara as linhas.
+            return new Recuperacao(Boolean.TRUE, List.of());
+        }
+
+        /** Nunca nulo: o construtor compacto resolve a ausência. */
+        public boolean ligada() {
+            return Boolean.TRUE.equals(habilitada);
+        }
+    }
+
+    /**
+     * Uma linha substituta declarada em configuração.
+     *
+     * <p>É um tipo de borda, espelho de {@code dominio.Substituto}: ele conhece o
+     * formato do arquivo, e o do domínio conhece as regras. A validação — jornada
+     * presente, termo presente, destino relativo — mora no domínio, e por isso
+     * configuração inválida derruba a subida em vez de produzir uma linha quebrada
+     * na primeira busca que falhar.
+     */
+    public record LinhaSubstituta(String jornada, String termo, String rotulo, String destino) { }
+
+    /**
+     * O cache do perfil por sessão de digitação.
+     *
+     * <p>Os três números têm papéis diferentes e o do meio é o único que muda
+     * comportamento observável. Ver {@code PerfisComCache} para o raciocínio
+     * inteiro — incluindo por que a invalidação por escrita foi recusada.
+     */
+    public record CacheDePerfil(boolean habilitado, long ttlMs, int tetoDeChaves) {
+
+        /**
+         * O teto do TTL, e ele é código em vez de comentário.
+         *
+         * <p>Trinta segundos. Acima disso o objeto deixa de ser "o perfil
+         * enquanto a pessoa digita" e passa a ser "o perfil", o que é outra
+         * decisão com outros riscos: a rodada de agregação roda a cada 15 s, e um
+         * TTL de minutos a torna invisível — o sistema continuaria aprendendo e
+         * pararia de usar o que aprendeu, sem erro em lugar nenhum.
+         *
+         * <p>Recusar na subida em vez de documentar é a diferença entre um limite
+         * e um conselho.
+         */
+        private static final long TTL_MAXIMO_MS = 30_000;
+
+        public CacheDePerfil {
+            ttlMs = ttlMs <= 0 ? 5_000 : ttlMs;
+            tetoDeChaves = tetoDeChaves <= 0 ? 50_000 : tetoDeChaves;
+
+            if (ttlMs > TTL_MAXIMO_MS) {
+                throw new IllegalArgumentException(
+                        "sugestao.cache-de-perfil.ttl-ms=" + ttlMs + " passa do teto de "
+                                + TTL_MAXIMO_MS + " ms. Acima disto o cache deixa de cobrir uma "
+                                + "sessao de digitacao e passa a esconder a agregacao, que roda "
+                                + "a cada 15 s.");
+            }
+        }
+
+        /**
+         * Desligado, igual ao {@code application.properties} — e os dois têm de
+         * concordar.
+         *
+         * <p>Este método é o caminho de quem não tem a seção no arquivo. Se ele
+         * devolvesse "ligado", uma configuração incompleta teria o cache ativo
+         * enquanto a documentação afirma o contrário, e o default declarado
+         * passaria a depender de o arquivo estar completo. Ver decisão 27 para
+         * por que o desligado é o lado seguro aqui.
+         */
+        public static CacheDePerfil padrao() {
+            return new CacheDePerfil(false, 5_000, 50_000);
         }
     }
 

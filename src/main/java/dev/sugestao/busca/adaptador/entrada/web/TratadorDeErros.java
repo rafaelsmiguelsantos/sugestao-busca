@@ -6,18 +6,25 @@ import dev.sugestao.busca.dominio.oferta.OfertaInvalida;
 import dev.sugestao.busca.dominio.oferta.Violacao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.server.ServerHttpRequest;
+import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
@@ -53,11 +60,16 @@ import java.util.Map;
  * lado de escrita.
  */
 @RestControllerAdvice
-public class TratadorDeErros extends ResponseEntityExceptionHandler {
+public class TratadorDeErros extends ResponseEntityExceptionHandler
+        implements ResponseBodyAdvice<Object> {
 
     private static final Logger registro = LoggerFactory.getLogger(TratadorDeErros.class);
 
     private static final String BASE = "https://sugestao-busca.dev/problemas/";
+
+    /** {@code application/problem+json;charset=UTF-8}. Ver {@link #beforeBodyWrite}. */
+    private static final MediaType PROBLEMA_UTF8 = new MediaType(
+            MediaType.APPLICATION_PROBLEM_JSON, StandardCharsets.UTF_8);
 
     /**
      * 422 e não 400.
@@ -177,6 +189,53 @@ public class TratadorDeErros extends ResponseEntityExceptionHandler {
 
         registro.info("corpo ilegivel: {}", e.getMostSpecificCause().getMessage());
         return ResponseEntity.badRequest().body(problema);
+    }
+
+    /**
+     * Declara {@code charset=UTF-8} em toda resposta de problema.
+     *
+     * <p><strong>Por que isto não é redundante com
+     * {@code ConfiguracaoWeb.extendMessageConverters}.</strong> Aquele método
+     * acrescenta o parâmetro aos tipos <em>suportados</em> dos conversores, e
+     * resolve o caminho de sucesso. {@link ProblemDetail} não passa por ali: o
+     * Spring escolhe o tipo de resposta dele a partir de uma constante
+     * — {@code APPLICATION_PROBLEM_JSON}, sem charset — e essa escolha vence a
+     * lista de suportados.
+     *
+     * <p>O resultado, <em>medido</em>, era a mesma inconsistência de antes
+     * mudada de lugar: sucesso e os 401/403 da cadeia de segurança declaravam o
+     * charset, e o 404 e o <strong>422</strong> não. O 422 é precisamente a
+     * resposta mais cheia de texto acentuado deste serviço — "caminho relativo
+     * começando com '/'", "valor não reconhecido" — ou seja, a correção tinha
+     * deixado de fora o corpo que mais precisava dela.
+     *
+     * <p>Um {@code ResponseEntity} com {@code contentType} em cada apanhador
+     * resolveria e repetiria a decisão seis vezes, com a sétima sendo esquecida.
+     * Foi exatamente assim que o defeito original nasceu.
+     */
+    @Override
+    public boolean supports(MethodParameter retorno, Class<? extends HttpMessageConverter<?>> conversor) {
+        return true;
+    }
+
+    @Override
+    public Object beforeBodyWrite(
+            Object corpo,
+            MethodParameter retorno,
+            MediaType tipoEscolhido,
+            Class<? extends HttpMessageConverter<?>> conversor,
+            ServerHttpRequest requisicao,
+            ServerHttpResponse resposta) {
+
+        // Só problem+json, e só quando ninguém declarou charset. A resposta de
+        // sucesso já vem resolvida pelos conversores, e sobrescrever um charset
+        // declarado à mão seria desfazer uma decisão de quem a declarou.
+        if (tipoEscolhido != null
+                && tipoEscolhido.getCharset() == null
+                && MediaType.APPLICATION_PROBLEM_JSON.equalsTypeAndSubtype(tipoEscolhido)) {
+            resposta.getHeaders().setContentType(PROBLEMA_UTF8);
+        }
+        return corpo;
     }
 
     private static Map<String, String> comoMapa(Violacao violacao) {

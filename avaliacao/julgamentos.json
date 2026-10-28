@@ -1,0 +1,403 @@
+{
+  "versao": 1,
+  "atualizadoEm": "2026-10-27",
+  "origem": "autoria humana sobre o catalogo semeado; ver avaliacao/README.md para o caminho de LLM",
+
+  "rubrica": {
+    "3": "e o que a pessoa procurava, e ela pode agir agora",
+    "2": "mesma jornada, alternativa plausivel",
+    "1": "relacionado: ajuda, explicacao, ou acao vizinha",
+    "0": "nao julgado. Toda linha devolvida que nao aparece no mapa vale zero"
+  },
+
+  "comoAChaveEComparada": "O termo julgado e comparado NORMALIZADO - sem acento, em minusculas, pontuacao virando espaco - pela mesma funcao que normaliza o prefixo digitado. Entao 'Tesouro Direto', 'tesouro direto' e 'TESOURO DIRETO' sao a MESMA entrada, e declarar duas delas e redundancia (e, no PowerShell 5.1, erro de chave duplicada). Escreva o termo como o catalogo o escreve; a comparacao cuida do resto. Isto existe para que uma correcao de copy no catalogo nao zere a nota de uma consulta sem que nada de relevancia tenha mudado.",
+
+  "consultas": [
+    {
+      "q": "pix",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "prefixo curto de jornada larga: mede se as acoes de Pix vencem os termos de log que apenas contem a palavra",
+      "julgamentos": {
+        "cadastrar chave Pix": 3,
+        "limite do Pix": 3,
+        "Pix agendado": 2,
+        "comprovante de Pix": 2,
+        "transferir por pix": 2,
+        "agendar pix": 2,
+        "alterar limite do pix": 2,
+        "ver limite do pix": 2,
+        "aumentar limite do pix": 2,
+        "bloquear pix": 1,
+        "cancelar pix agendado": 1
+      }
+    },
+    {
+      "q": "emprestim",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "a consulta da jornada lider. Quem digita isto quer contratar, nao entender - e a oferta tem de vencer o artigo",
+      "julgamentos": {
+        "empréstimo pessoal": 3,
+        "contratar emprestimo": 2,
+        "simular emprestimo": 2,
+        "crédito consignado": 2,
+        "simular consignado": 1,
+        "como funciona o consignado": 1
+      }
+    },
+    {
+      "q": "emprestmo",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "ERRO DE DIGITACAO. Nove letras, uma faltando: so chega a algum lugar pela consulta tolerante. NDCG baixo aqui significa que a tolerancia parou de funcionar",
+      "julgamentos": {
+        "empréstimo pessoal": 3,
+        "contratar emprestimo": 2,
+        "simular emprestimo": 2
+      }
+    },
+    {
+      "q": "consignado",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "produto dentro da jornada credito. E o caso que a afinidade POR PRODUTO existe para desempatar contra emprestimo",
+      "julgamentos": {
+        "crédito consignado": 3,
+        "simular consignado": 2,
+        "como funciona o consignado": 1
+      }
+    },
+    {
+      "q": "consignadoo",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "ERRO DE DIGITACAO por letra dobrada, onze letras: distancia 2",
+      "julgamentos": {
+        "crédito consignado": 3,
+        "simular consignado": 2,
+        "como funciona o consignado": 1
+      }
+    },
+    {
+      "q": "limite",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "GATILHO ATIVO (pix_recusado_72h). A antecipacao deve abrir a lista pela cota de evento, nao por score",
+      "julgamentos": {
+        "antecipação de limite": 3,
+        "aumentar limite do cartão": 3,
+        "limite do Pix": 2,
+        "consultar limite": 2,
+        "alterar limite do pix": 2,
+        "ver limite do pix": 2,
+        "aumentar limite do pix": 2,
+        "como antecipar o limite": 1
+      }
+    },
+    {
+      "q": "fatura",
+      "cliente": "pf-negativado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "conta em atraso com elegibilidade de parcelamento. O credito novo esta vetado; o caminho que resolve, nao",
+      "julgamentos": {
+        "parcelar fatura do cartão": 3,
+        "fatura do cartão": 2,
+        "consultar fatura": 2,
+        "ver fatura": 2,
+        "pagar fatura": 2,
+        "alterar vencimento da fatura": 1
+      }
+    },
+    {
+      "q": "renegoci",
+      "cliente": "pf-negativado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "o caminho certo para quem esta em atraso. A oferta tem de vencer o artigo de ajuda com o mesmo nome",
+      "julgamentos": {
+        "renegociar dívida": 3,
+        "como renegociar uma dívida": 2
+      }
+    },
+    {
+      "q": "cdb",
+      "cliente": "pf-investidor",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "PRODUTO JA CONTRATADO. A oferta de CDB deve sair da lista, e por isso ela NAO esta julgada: devolve-la seria ruido, nao acerto. A nota em 'cdb' e o historico da propria pessoa voltando para ela - acrescentada depois da primeira medicao, ver 'Honestidade sobre a autoria' no README",
+      "julgamentos": {
+        "cdb": 1,
+        "contratar cdb": 1
+      }
+    },
+    {
+      "q": "tesouro",
+      "cliente": "pf-investidor",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "historico do proprio cliente colidindo com item de catalogo: a deduplicacao deve entregar UMA linha, com o destino do catalogo",
+      "julgamentos": {
+        "Tesouro Direto": 3
+      }
+    },
+    {
+      "q": "investi",
+      "cliente": "pf-uniclass",
+      "segmento": "PF",
+      "relacionamento": "UNICLASS",
+      "nota": "faixa de relacionamento mudando a lista NO INDICE, antes de o perfil ser lido. As notas em 'LCI e LCA' e 'CDB' foram acrescentadas depois da primeira medicao: sao produtos de investimento que esta pessoa pode contratar e nao contratou, e se defendem pelo merito - ver 'Honestidade sobre a autoria' no README",
+      "julgamentos": {
+        "consultoria de investimentos": 3,
+        "LCI e LCA": 2,
+        "CDB": 2,
+        "simular investimento": 2,
+        "ver meus investimentos": 2
+      }
+    },
+    {
+      "q": "poupanca",
+      "cliente": "pf-investidor",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "acento no indice contra prefixo normalizado: 'poupanca' tem de alcancar 'poupanca' com cedilha",
+      "julgamentos": {
+        "rendimento da poupança": 3,
+        "consultar rendimento": 1
+      }
+    },
+    {
+      "q": "seguro",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "duas ofertas irmas sem nenhuma restricao. Mede ordenacao pura, sem peneira no caminho",
+      "julgamentos": {
+        "seguro de vida": 3,
+        "seguro do celular": 3,
+        "contratar seguro": 2,
+        "cancelar seguro": 1
+      }
+    },
+    {
+      "q": "cartao",
+      "cliente": "pf-sem-elegibilidade",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "elegibilidade de nada. As duas ofertas de cartao somem e o resto fica - falha fechada funcionando, e a lista continua util",
+      "julgamentos": {
+        "cartão virtual": 3,
+        "fatura do cartão": 2,
+        "segunda via do cartão": 2,
+        "aumentar limite do cartao": 2,
+        "contratar cartao": 2,
+        "desbloquear cartão": 1,
+        "bloquear cartao": 1,
+        "cancelar cartao": 1,
+        "programa de pontos": 1
+      }
+    },
+    {
+      "q": "bloquear",
+      "cliente": "pf-bloqueado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "CONTA BLOQUEADA. O que exige conta operante sai; desbloquear e contestar ficam. Esconder a busca desta pessoa seria a decisao errada",
+      "julgamentos": {
+        "bloquear conta por roubo": 3,
+        "desbloquear cartão": 3,
+        "bloquear cartao": 2,
+        "bloquear pix": 2,
+        "bloquear conta": 2
+      }
+    },
+    {
+      "q": "transfer",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "acao de catalogo contra cinco termos de log quase sinonimos. A deduplicacao e a cota decidem a lista aqui",
+      "julgamentos": {
+        "transferência TED": 3,
+        "transferir para outro banco": 2,
+        "transferir por pix": 2,
+        "transferir dinheiro": 2,
+        "transferir para minha conta": 2,
+        "agendar transferencia": 2
+      }
+    },
+    {
+      "q": "extrato",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "extrato da conta": 3,
+        "consultar extrato": 2,
+        "ver extrato": 2
+      }
+    },
+    {
+      "q": "saldo",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "saldo da conta": 3,
+        "consultar saldo": 2
+      }
+    },
+    {
+      "q": "boleto",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "'pagar boleto' esta no historico desta pessoa E no catalogo E no log. Tres camadas, uma linha",
+      "julgamentos": {
+        "pagar boleto": 3,
+        "emitir boleto": 2
+      }
+    },
+    {
+      "q": "agendar",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "agendar pix": 2,
+        "agendar transferencia": 2,
+        "agendar pagamento": 2,
+        "Pix agendado": 1
+      }
+    },
+    {
+      "q": "informe",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "informe de rendimentos": 3,
+        "emitir informe de rendimentos": 2
+      }
+    },
+    {
+      "q": "tarifa",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "tarifas da conta": 3,
+        "consultar tarifas": 2
+      }
+    },
+    {
+      "q": "cet",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "o termo que o portao de publicacao teve de tratar como caso especial: 'o que e CET' comeca com palavra de uma letra, abaixo do minGram",
+      "julgamentos": {
+        "o que é CET": 3
+      }
+    },
+    {
+      "q": "pontos",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "programa de pontos": 3,
+        "consultar pontos": 2
+      }
+    },
+    {
+      "q": "contest",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "contestar compra": 3
+      }
+    },
+    {
+      "q": "segunda via",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "prefixo com espaco. O edismax quebra no espaco ANTES da analise de campo, entao isto testa duas clausulas e nao uma",
+      "julgamentos": {
+        "segunda via do cartão": 3
+      }
+    },
+    {
+      "q": "capital",
+      "cliente": "pj-lojista",
+      "segmento": "PJ",
+      "relacionamento": "VAREJO",
+      "nota": "o mesmo mecanismo no outro segmento. O fq de segmento esconde todo o catalogo PF",
+      "julgamentos": {
+        "capital de giro": 3
+      }
+    },
+    {
+      "q": "antecip",
+      "cliente": "pj-lojista",
+      "segmento": "PJ",
+      "relacionamento": "VAREJO",
+      "nota": "GATILHO ATIVO no segmento PJ (recebivel_disponivel_24h)",
+      "julgamentos": {
+        "antecipação de recebíveis": 3
+      }
+    },
+    {
+      "q": "maquininha",
+      "cliente": "pj-lojista",
+      "segmento": "PJ",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "taxa da maquininha": 3
+      }
+    },
+    {
+      "q": "conta pj",
+      "cliente": "pj-lojista",
+      "segmento": "PJ",
+      "relacionamento": "VAREJO",
+      "julgamentos": {
+        "conta PJ": 3,
+        "emitir boleto": 1
+      }
+    },
+    {
+      "q": "imobiliario",
+      "cliente": "pf-novo",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "LISTA RESGATADA. Nenhum perfil de demonstracao tem elegibilidade de FINANCIAMENTO_IMOVEL, entao a oferta sai e a substituta de credito entra. A nota 1 na substituta e POSICAO EDITORIAL explicita: uma linha de jornada vale mais que lista vazia. Quem discordar edita este numero",
+      "julgamentos": {
+        "financiamento imobiliário": 3,
+        "simular credito": 1,
+        "simular financiamento": 2
+      }
+    },
+    {
+      "q": "veiculos",
+      "cliente": "pf-pix-recusado",
+      "segmento": "PF",
+      "relacionamento": "VAREJO",
+      "nota": "DOIS DEFEITOS CONHECIDOS NUMA CONSULTA, e por isso ela fica aqui com NDCG baixo de proposito. O plural so alcanca o documento pela tolerancia a erro de digitacao - nao ha stemmer de portugues, e a tolerancia esta fazendo o trabalho de um. E nenhum perfil tem elegibilidade de FINANCIAMENTO_VEICULO, entao a oferta sai de todo jeito. O numero sobe quando o dado de elegibilidade for corrigido, e e assim que se descobre que foi",
+      "julgamentos": {
+        "financiamento de veículo": 3,
+        "simular credito": 1,
+        "simular financiamento": 2
+      }
+    }
+  ]
+}

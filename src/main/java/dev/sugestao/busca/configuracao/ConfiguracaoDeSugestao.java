@@ -4,6 +4,7 @@ import dev.sugestao.busca.adaptador.entrada.agendador.AgendadorDeAprendizado;
 import dev.sugestao.busca.adaptador.saida.agregado.AgregadosEmMemoria;
 import dev.sugestao.busca.adaptador.saida.agregado.EventosDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.fila.FilaEmMemoria;
+import dev.sugestao.busca.adaptador.saida.perfil.PerfisComCache;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisDaDemonstracao;
 import dev.sugestao.busca.adaptador.saida.perfil.PerfisEmMemoria;
 import dev.sugestao.busca.adaptador.saida.resiliencia.CatalogoComDisjuntor;
@@ -43,12 +44,18 @@ import dev.sugestao.busca.dominio.Misturador;
 import dev.sugestao.busca.dominio.Peneira;
 import dev.sugestao.busca.dominio.PesosDeRanking;
 import dev.sugestao.busca.dominio.Rankeador;
+import dev.sugestao.busca.dominio.Recuperador;
+import dev.sugestao.busca.dominio.Substituto;
+import dev.sugestao.busca.dominio.Substitutos;
 import dev.sugestao.busca.dominio.evento.Saneador;
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.Gauge;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.impl.HttpJdkSolrClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
@@ -170,6 +177,101 @@ public class ConfiguracaoDeSugestao {
         return new PerfisEmMemoria(PerfisDaDemonstracao.iniciais());
     }
 
+    /**
+     * A porta de <em>leitura</em> de perfil, possivelmente com cache.
+     *
+     * <p>Mesmo padrão do disjuntor no catálogo, e aqui ele tem uma consequência
+     * que vale olhar: <strong>só a leitura é decorada.</strong> O bean acima
+     * continua sendo o que atende {@code EscritorDePerfil}, direto, sem passar
+     * por cache nenhum. Então a agregação escreve no mapa e as leituras seguintes
+     * vão vê-lo quando o TTL vencer — que é exatamente o comportamento descrito
+     * em {@link PerfisComCache}, e não um efeito colateral desta fiação.
+     *
+     * <p>O {@code @Primary} é necessário e não é decoração. {@code PerfisEmMemoria}
+     * implementa as duas portas, então existem dois beans do tipo
+     * {@code RepositorioDePerfil} e o Spring não teria como escolher. A anotação
+     * diz qual é a porta de leitura do sistema; o outro continua acessível por
+     * tipo concreto, que é como esta classe o injeta aqui.
+     *
+     * <p>Desligar é devolver o adaptador cru — não um cache de TTL zero. Um cache
+     * que não guarda nada ainda paga a estrutura, ainda aparece nas métricas com
+     * 0% de acerto, e ainda é um objeto no caminho de execução para não fazer
+     * nada.
+     */
+    @Bean
+    @Primary
+    public RepositorioDePerfil repositorioDePerfil(
+            PerfisEmMemoria base, SugestaoProperties props, MeterRegistry registro) {
+
+        var config = props.cacheDePerfil() == null
+                ? SugestaoProperties.CacheDePerfil.padrao()
+                : props.cacheDePerfil();
+
+        if (!config.habilitado()) {
+            return base;
+        }
+
+        var comCache = new PerfisComCache(
+                base, Duration.ofMillis(config.ttlMs()), config.tetoDeChaves());
+
+        // As três saem sempre que o cache está ligado, independente de
+        // sugestao.medicao.habilitada. Aquele interruptor governa a porta
+        // MedidorDeBusca, que é medição de qualidade de busca; estes são
+        // contadores de infraestrutura, da mesma natureza dos de JVM que o
+        // Actuator já publica — e sem a taxa de acerto não há como saber se o TTL
+        // escolhido corresponde à velocidade real de digitação.
+        FunctionCounter.builder("sugestao.perfil.cache.acertos", comCache,
+                        p -> p.estatisticas().acertos())
+                .description("leituras de perfil servidas pelo cache da sessao de digitacao")
+                .register(registro);
+
+        FunctionCounter.builder("sugestao.perfil.cache.erros", comCache,
+                        p -> p.estatisticas().erros())
+                .description("leituras de perfil que foram ao adaptador")
+                .register(registro);
+
+        Gauge.builder("sugestao.perfil.cache.itens", comCache,
+                        p -> p.estatisticas().itens())
+                .description("perfis guardados agora")
+                .register(registro);
+
+        return comCache;
+    }
+
+    /**
+     * A etapa de recuperação, e a tabela de linhas substitutas que ela consulta.
+     *
+     * <p>A tradução de {@code SugestaoProperties.LinhaSubstituta} para
+     * {@code Substituto} acontece aqui, e é onde a validação do domínio é
+     * exercida: jornada ausente, termo vazio ou destino absoluto <strong>derrubam
+     * a subida</strong>. É o lugar certo para esse erro — ele é de quem editou a
+     * configuração, aparece uma vez, e aparece antes de a primeira pessoa buscar.
+     * A alternativa seria uma linha quebrada aparecendo na tela de quem já tinha
+     * recebido lista vazia.
+     *
+     * <p>Desligado é tabela vazia, e não um recuperador ausente: o
+     * {@link Recuperador} com {@link Substitutos#NENHUM} sai no primeiro
+     * {@code if} e devolve {@code Optional.empty()}. Aqui o no-op é um valor
+     * declarado, não um objeto que finge.
+     */
+    @Bean
+    public Recuperador recuperador(SugestaoProperties props) {
+        var config = props.recuperacao() == null
+                ? SugestaoProperties.Recuperacao.padrao()
+                : props.recuperacao();
+
+        if (!config.ligada()) {
+            return new Recuperador(Substitutos.NENHUM);
+        }
+
+        var declaradas = config.linhas().stream()
+                .map(linha -> new Substituto(
+                        linha.jornada(), linha.termo(), linha.rotulo(), linha.destino()))
+                .toList();
+
+        return new Recuperador(new Substitutos(declaradas));
+    }
+
     @Bean
     public Peneira peneira(SugestaoProperties props) {
         return new Peneira(props.kAnonimatoMinimo());
@@ -229,11 +331,12 @@ public class ConfiguracaoDeSugestao {
             Peneira peneira,
             Rankeador rankeador,
             Misturador misturador,
+            Recuperador recuperador,
             ParametrosDeSugestao parametros,
             MedidorDeBusca medidor) {
 
         return new SugerirSugestoesCasoDeUso(catalogo, perfis, classificador, peneira,
-                rankeador, misturador, parametros, medidor);
+                rankeador, misturador, recuperador, parametros, medidor);
     }
 
     // -----------------------------------------------------------------------

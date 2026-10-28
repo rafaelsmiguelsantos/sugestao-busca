@@ -37,5 +37,41 @@ public enum MotivoDeDescarte {
     COTA_DE_EVENTO,
 
     /** Sobrou relevância, acabaram as posições. */
-    ALEM_DO_LIMITE
+    ALEM_DO_LIMITE;
+
+    /**
+     * Este motivo diz que a linha existia, casava com o que a pessoa digitou, e
+     * saiu por uma <strong>condição desta pessoa</strong>.
+     *
+     * <p>É a pergunta que o {@link Recuperador} faz, e a resposta separa dois
+     * tipos de lista vazia que nada mais no sistema separa:
+     *
+     * <ul>
+     *   <li><em>Não há nada.</em> O prefixo não casou com documento nenhum, ou o
+     *       que casou saiu por cota, duplicação ou teto de lista. Aqui a lista
+     *       vazia é a resposta certa e não há jornada para oferecer alternativa —
+     *       inventar uma seria devolver algo que ninguém procurou.</li>
+     *   <li><em>Há, e esta pessoa não pode.</em> A busca encontrou a coisa certa e
+     *       a peneira a tirou com razão. A lista vazia aqui é o defeito: a
+     *       jornada é conhecida, e existe caminho dentro dela que não exige nada.</li>
+     * </ul>
+     *
+     * <p><strong>{@link #ABAIXO_DO_PISO} fica de fora, e é a exclusão que
+     * importa.</strong> Se um termo de log abaixo do piso de k-anonimato gerasse
+     * linha substituta, a presença da substituta informaria que <em>algo casou
+     * com aquele prefixo</em> — e esconder exatamente isso é a única coisa que o
+     * piso faz. O recurso que recupera lista vazia não pode ser o canal lateral
+     * que desfaz o controle de privacidade.
+     *
+     * <p>{@link #PRODUTO_JA_CONTRATADO} fica dentro: quem já tem o produto e
+     * digita o nome dele continua tendo interesse na jornada, e hoje recebe nada.
+     */
+    public boolean condicionalDoCliente() {
+        return switch (this) {
+            case PRODUTO_JA_CONTRATADO, SEM_ELEGIBILIDADE,
+                 CONTA_INADIMPLENTE, CONTA_NAO_OPERANTE -> true;
+            case ABAIXO_DO_PISO, TERMO_DUPLICADO, COTA_DE_HISTORICO,
+                 COTA_DE_EVENTO, ALEM_DO_LIMITE -> false;
+        };
+    }
 }

@@ -48,6 +48,7 @@ public class MedidorMicrometer implements MedidorDeBusca {
 
     private static final String BUSCAS = "sugestao.buscas";
     private static final String DESCARTES = "sugestao.descartes";
+    private static final String SUBSTITUTAS = "sugestao.substitutas";
     private static final String REBAIXADAS = "sugestao.linhas.rebaixadas";
     private static final String TOLERANCIA = "sugestao.tolerancia";
     private static final String LATENCIA = "sugestao.latencia";
@@ -123,16 +124,42 @@ public class MedidorMicrometer implements MedidorDeBusca {
         if (rebaixadas > 0) {
             registro.counter(REBAIXADAS).increment(rebaixadas);
         }
+
+        // A substituta por jornada, e a jornada é o que faz este contador valer.
+        //
+        // O total responde "o recurso age?"; a jornada responde "o que fazer a
+        // respeito?". Substituta concentrada em `credito` significa que há oferta
+        // de crédito casando com o que as pessoas digitam e que quase ninguém
+        // pode contratar — leitura de catálogo, não de relevância. Sem o rótulo,
+        // o número é só uma curiosidade.
+        if (rastro.substituida()) {
+            String jornada = rastro.jornadaSubstituta();
+            registro.counter(SUBSTITUTAS, "jornada", jornada.isBlank() ? "nenhuma" : jornada)
+                    .increment();
+        }
     }
 
     /**
-     * O desfecho em quatro valores, e não em "vazio/não vazio".
+     * O desfecho em cinco valores, e não em "vazio/não vazio".
      *
      * <p>{@code SEM_OFERTA} é a categoria que faltava e que escondeu um defeito
      * real: {@code q=financiamento} devolvia uma linha de ação e nenhuma oferta.
      * Não era zero-resultado, então nenhum contador de lista vazia acusaria; e
      * não era sucesso, porque quem buscou financiamento não recebeu proposta
      * nenhuma. Sem este valor, o caso é invisível.
+     *
+     * <p>{@code SUBSTITUIDA} é o quinto, e existe para não estragar o quarto.
+     * A linha substituta nunca é oferta, então sem este valor toda busca
+     * resgatada cairia em {@code SEM_OFERTA} — e {@code SEM_OFERTA} passaria a
+     * significar duas coisas opostas: "encontrou conteúdo e nenhuma proposta" e
+     * "não encontrou nada e recebeu uma linha de consolo". Um valor que significa
+     * duas coisas é um valor que não significa nada.
+     *
+     * <p>E há uma propriedade que vale declarar: <strong>{@code ZERO_RESULTADO +
+     * SUBSTITUIDA} é a taxa de zero-resultado de antes do recurso.</strong> A
+     * série histórica continua comparável — a soma mede cobertura de busca, que
+     * não mudou, e a separação mede quantas dessas falhas de cobertura o resgate
+     * converteu em alguma coisa.
      */
     private static String desfecho(RastroDaSugestao rastro) {
         if (!rastro.prefixoAceito()) {
@@ -140,6 +167,9 @@ public class MedidorMicrometer implements MedidorDeBusca {
         }
         if (rastro.linhas().isEmpty()) {
             return "ZERO_RESULTADO";
+        }
+        if (rastro.substituida()) {
+            return "SUBSTITUIDA";
         }
         return rastro.temOferta() ? "COM_OFERTA" : "SEM_OFERTA";
     }

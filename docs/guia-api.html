@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
 <title>Chamando a Sugestão de Busca</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
@@ -129,7 +133,7 @@ p code, li code, td code { background: var(--superficie); border: 1px solid var(
 
 /* --- pipeline ---------------------------------------------------------- */
 .trilho { overflow-x: auto; padding-bottom: .5rem; }
-.pipeline { display: grid; grid-template-columns: repeat(5, minmax(9.5rem, 1fr)); gap: .5rem; min-width: 46rem; }
+.pipeline { display: grid; grid-template-columns: repeat(6, minmax(9.5rem, 1fr)); gap: .5rem; min-width: 56rem; }
 .etapa {
   background: var(--superficie); border: 1px solid var(--linha); border-radius: 5px;
   padding: .8rem .85rem; display: flex; flex-direction: column; gap: .35rem;
@@ -182,6 +186,8 @@ ul.lista strong { color: var(--tinta); font-weight: 600; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
+</head>
+<body>
 
 <div class="envoltorio">
 
@@ -366,6 +372,11 @@ HTTP 429  application/problem+json
             conta em atraso, produto já contratado, sem elegibilidade, ou fora da faixa. Não insista
             com outro prefixo: a ausência é a resposta.
           </p>
+          <p>
+            <strong>Ausente, não <code>null</code>:</strong> o campo não vem no JSON. Então
+            <code>resposta.melhorOferta === null</code> é <em>falso</em> justamente quando não há
+            oferta. Teste a existência da propriedade, não a igualdade com nulo.
+          </p>
         </div>
       </div>
 
@@ -396,8 +407,39 @@ HTTP 429  application/problem+json
             <tr><td class="n">HISTORICO</td><td>o que esta pessoa já buscou</td><td>ícone de relógio</td></tr>
             <tr><td class="n">CATALOGO</td><td>oferta curada ou cadastrada por uma jornada</td><td>a linha que carrega <code>ofertaId</code></td></tr>
             <tr><td class="n">POPULAR</td><td>o que gente de coorte parecida busca</td><td>sugestão de texto, sem produto</td></tr>
+            <tr><td class="n">SUBSTITUTO</td><td>a lista <em>ficaria vazia</em> porque nada era elegível para esta pessoa; esta é uma linha da jornada no lugar</td><td>não é resultado de busca: apresente como caminho alternativo, nunca como oferta. Vem sem <code>ofertaId</code> e com <code>relevancia</code> 0,0</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <h3 style="margin-top:.5rem">Quando a resposta é uma linha substituta</h3>
+      <div class="bloco">
+<pre><span class="cm">GET /v1/sugestoes?q=veiculos  — cliente sem elegibilidade de financiamento</span>
+{
+  <span class="ch">"prefixo"</span>: <span class="vl">"veiculos"</span>,
+  <span class="ch">"itens"</span>: [
+    { <span class="ch">"posicao"</span>: 0, <span class="ch">"ofertaId"</span>: <span class="vl">""</span>,
+      <span class="ch">"termo"</span>: <span class="vl">"simular credito"</span>,
+      <span class="ch">"rotulo"</span>: <span class="vl">"Veja as condicoes e simule"</span>,
+      <span class="ch">"destino"</span>: <span class="vl">"/app/credito/simular"</span>,
+      <span class="ch">"origem"</span>: <span class="vl">"SUBSTITUTO"</span>, <span class="ch">"relevancia"</span>: 0.0 }
+  ]
+  <span class="cm">// melhorOferta: AUSENTE — a substituta não é oferta</span>
+}</pre>
+      </div>
+
+      <div class="nota">
+        <strong>A linha substituta não diz por que a oferta saiu, e isso é de propósito.</strong> Ela
+        é função da <em>jornada</em> pedida, nunca do motivo do descarte — se variasse com o motivo,
+        a resposta contaria a quem sondasse a API qual restrição reprovou aquele cliente. Então não
+        tente inferir elegibilidade a partir dela: a mesma linha sai para conta em atraso, falta de
+        elegibilidade, conta inativa e oferta fora de vigência.
+      </div>
+
+      <div class="nota">
+        <strong>E ela não aparece quando a busca simplesmente não achou nada.</strong> Prefixo que
+        não casou documento nenhum continua devolvendo lista vazia — não há jornada a substituir.
+        Lista vazia segue sendo “nada a mostrar”, e nunca falha.
       </div>
     </div>
   </section>
@@ -407,7 +449,7 @@ HTTP 429  application/problem+json
     <div class="cabeca"><span class="numero">04</span><h2>O que acontece por dentro</h2></div>
     <div class="corpo-passo">
       <p>
-        Entre o <code>GET</code> e a resposta há cinco etapas, e a ordem não é intercambiável. O
+        Entre o <code>GET</code> e a resposta há seis etapas, e a ordem não é intercambiável. O
         orçamento inteiro é de 30&nbsp;ms, contado do início da requisição.
       </p>
 
@@ -436,6 +478,11 @@ HTTP 429  application/problem+json
           <div class="etapa">
             <div class="t">Misturar</div>
             <div class="d">Deduplica, reserva a linha do evento, respeita a cota do histórico, corta no limite.</div>
+            <div class="ms">CPU</div>
+          </div>
+          <div class="etapa">
+            <div class="t">Recuperar</div>
+            <div class="d">Se a lista ficou <strong>vazia porque o cliente não pode contratar</strong>, acrescenta uma linha de jornada — origem <code>SUBSTITUTO</code>. Lê os motivos do descarte, e é a única etapa que olha para trás.</div>
             <div class="ms">CPU</div>
           </div>
         </div>
@@ -527,6 +574,16 @@ fadiga = 1.00 ... 0.60   <span class="cm">exibida muitas vezes e nunca clicada</
         quais produtos aquele cliente não pode contratar, e isso é informação sobre a pessoa, não
         sobre a busca. A leitura do parâmetro falha fechada: só <code>true</code> e <code>1</code>
         ligam.
+      </div>
+
+      <div class="nota">
+        <strong>Quatro desses motivos ganham linha substituta quando esvaziam a lista; um não.</strong>
+        Inadimplência, conta não operante, falta de elegibilidade e produto já contratado são
+        condições <em>daquele cliente</em>, e para elas a resposta certa é um caminho alternativo da
+        jornada em vez de nada. <code>ABAIXO_DO_PISO</code> fica fora de propósito: ali a
+        <em>presença</em> da linha já seria o vazamento — ela anunciaria “havia algo aqui, e pouca
+        gente buscou”. <code>COTA_DE_HISTORICO</code> e <code>ALEM_DO_LIMITE</code> nunca esvaziam a
+        lista, então não entram na conta.
       </div>
     </div>
   </section>
@@ -774,6 +831,17 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
         existe não é engano: toda rota nasce fechada, e de passagem não se conta a quem sonda quais
         caminhos existem.
       </div>
+
+      <div class="nota">
+        <strong>Todas as respostas declaram o charset</strong> —
+        <code>application/json;charset=UTF-8</code> no sucesso e
+        <code>application/problem+json;charset=UTF-8</code> nos erros, nos oito caminhos de resposta
+        do serviço. Pelo RFC, omitir já significaria UTF-8; na prática, cliente que não lê o RFC cai
+        em ISO-8859-1 e recebe <code>emprÃ©stimo</code> em todo termo acentuado. Aqui isso derrubou
+        uma medição de qualidade de ordem de 0,89 para 0,56 — um defeito de encoding vestido de
+        regressão de ranking. Se você vir acento quebrado, confira o <em>seu</em> decodificador: o
+        cabeçalho está declarado.
+      </div>
     </div>
   </section>
 
@@ -787,6 +855,8 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
         <li><strong>Resposta fora de ordem.</strong> A de <code>cons</code> pode chegar depois da de <code>consignado</code> e sobrescrever a lista certa. Em rede local quase nunca acontece; em 4G acontece sempre. Cancelar ajuda e <em>não</em> resolve — o cancelamento é uma corrida. Compare o campo <code>prefixo</code> que volta com o que está no campo agora: ele existe para isso.</li>
         <li><strong>Mínimo de 2 caracteres no cliente</strong>, para não gastar ida e volta.</li>
         <li><strong>Lista vazia é “nada a mostrar”</strong>, nunca falha.</li>
+        <li><strong>Trate <code>origem: "SUBSTITUTO"</code> como caminho, não como oferta.</strong> Ela aparece onde antes vinha lista vazia, vem sem <code>ofertaId</code> e com <code>relevancia</code> 0,0, e não deve entrar na contagem de ofertas exibidas. Registrar impressão dela é útil; tratá-la como produto não.</li>
+        <li><strong>Teste a <em>existência</em> de <code>melhorOferta</code></strong>, não <code>!== null</code>. O campo é omitido quando não há oferta, e comparar com nulo inverte a condição.</li>
         <li><strong>Conjunto de cabeçalhos estável.</strong> Mudar o conjunto entre requisições invalida o cache do preflight, e aí cada busca vira duas.</li>
         <li><strong>Mande <code>produto</code> no clique e <code>termosExibidos</code> completo.</strong> São os dois campos que deixaram de ser decorativos. Sem o primeiro, a personalização nunca passa do nível da jornada; sem o segundo, o sinal negativo nunca age.</li>
         <li><strong>Leia <code>RateLimit-Remaining</code>.</strong> É o aviso antes do <code>429</code>, e dá para aumentar o <code>debounce</code> quando a sobra encolher.</li>
@@ -810,10 +880,18 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
       máquina — serve para comparar mudanças, não para dimensionar capacidade.
     </p>
     <p>
-      Verificado: 174 testes de unidade, 56 asserções de contrato e 55 sondas adversariais, mais um
-      caçador de teste instável que roda a suíte sob contenção de CPU —
+      Verificado: 200 testes de unidade, <strong>216 asserções de contrato por HTTP de verdade</strong>
+      — 56 sobre o cadastro e 160 sobre o consumo, estas simulando uma sessão de digitação — e 55
+      sondas adversariais, mais um caçador de teste instável que roda a suíte sob contenção de CPU —
       <code>scripts/cacar-flaky.ps1</code>. Três asserções deste projeto afirmavam igualdade exata
       sobre valor decaído e passavam por sorte; a última só apareceu com os doze núcleos ocupados.
+    </p>
+    <p>
+      A qualidade da <strong>ordem</strong> também é medida, e como portão de build: <strong>NDCG@5
+      de 0,9116</strong> sobre 32 consultas e 107 pares julgados à mão, com a linha de base
+      versionada e saída com código 1 quando a média cai mais que a tolerância. Era a única coisa
+      que o projeto não media — taxa de zero-resultado, desfecho, posição clicada e motivo de
+      descarte não dizem nada sobre ordem.
     </p>
     <p>
       O raciocínio por trás de cada decisão, com o que foi recusado e por quê, está em
@@ -850,3 +928,6 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
     selecao.addRange(faixa);
   }
 </script>
+
+</body>
+</html>

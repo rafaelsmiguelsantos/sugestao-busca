@@ -129,6 +129,44 @@ function Impressoes($quantas, $termo) {
     return $lista
 }
 
+# ---------------------------------------------------------------------------
+# PORTAO: este script e INCOMPATIVEL com o cache de perfil ligado.
+# ---------------------------------------------------------------------------
+# Ele roda POST /v1/aprendizado/rodar e consulta NA LINHA SEGUINTE. Com o cache
+# de leitura ligado, a segunda consulta e servida pelo perfil anterior, e as
+# cinco verificacoes de comportamento falham com relevancia IDENTICA byte a byte
+# antes e depois - o que parece "os tres sinais nao funcionam" e e so leitura
+# velha. Medido: 5 falhas com o cache ligado, 0 com ele desligado.
+#
+# Nenhum valor de TTL conserta: a segunda leitura acontece milissegundos depois
+# da escrita. Por isso o default no application.properties e DESLIGADO.
+#
+# Este portao existe porque descobrir isso lendo cinco FALHA custa uma tarde, e
+# a mensagem abaixo custa dez linhas. Diagnosticar e melhor que dormir: um
+# Start-Sleep aqui esconderia a incompatibilidade em vez de nomea-la.
+try {
+    $m = Invoke-RestMethod -TimeoutSec 10 -Headers $comoOperacao `
+        -Uri "$BaseUrl/actuator/metrics/sugestao.perfil.cache.acertos"
+
+    if ($null -ne $m) {
+        Write-Host ''
+        Write-Host 'O CACHE DE PERFIL ESTA LIGADO, e este script nao funciona com ele.' -ForegroundColor Red
+        Write-Host ''
+        Write-Host '  Ele aprende e consulta na linha seguinte; o cache serve o perfil' -ForegroundColor Yellow
+        Write-Host '  anterior, e os tres sinais de comportamento aparecem inertes.' -ForegroundColor Yellow
+        Write-Host '  Nao e defeito da aplicacao nem do cache: sao propositos opostos.' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host '  Suba com:  --sugestao.cache-de-perfil.habilitado=false' -ForegroundColor Cyan
+        Write-Host '  (e o default do repositorio ja e esse)' -ForegroundColor DarkGray
+        Write-Host ''
+        exit 2
+    }
+} catch {
+    # Metrica ausente = cache desligado, ou medicao desligada, ou Actuator sem a
+    # rota. Nos tres casos seguir e o certo: o portao e para evitar diagnostico
+    # errado, nao para exigir observabilidade.
+}
+
 Write-Host ''
 Write-Host "Cliente: $Cliente ($Relacionamento)   prefixo: '$Prefixo'" -ForegroundColor Cyan
 Write-Host "Alvo dos cliques: $Alvo     Controle: $Controle" -ForegroundColor Cyan

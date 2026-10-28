@@ -1,0 +1,200 @@
+﻿{
+    "medidoEm":  "2026-10-27T18:41:25.1211467-03:00",
+    "versaoConjunto":  1,
+    "media5":  0.90499260377241209,
+    "media8":  0.9071229879851308,
+    "porConsulta":  [
+                        {
+                            "q":  "pix",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  0.86986873191948377,
+                            "ndcg8":  0.85494721827960973
+                        },
+                        {
+                            "q":  "emprestim",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0.96795366743752842,
+                            "ndcg8":  0.940210232287338
+                        },
+                        {
+                            "q":  "emprestmo",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0.94219457631406855,
+                            "ndcg8":  0.94219457631406855
+                        },
+                        {
+                            "q":  "consignado",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0.97212121981293154,
+                            "ndcg8":  0.97212121981293154
+                        },
+                        {
+                            "q":  "consignadoo",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0.97212121981293154,
+                            "ndcg8":  0.97212121981293154
+                        },
+                        {
+                            "q":  "limite",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0.96592389027655357,
+                            "ndcg8":  0.96591013332986964
+                        },
+                        {
+                            "q":  "fatura",
+                            "cliente":  "pf-negativado",
+                            "ndcg5":  0.9397677784787497,
+                            "ndcg8":  0.99535728154071668
+                        },
+                        {
+                            "q":  "renegoci",
+                            "cliente":  "pf-negativado",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "cdb",
+                            "cliente":  "pf-investidor",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "tesouro",
+                            "cliente":  "pf-investidor",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "investi",
+                            "cliente":  "pf-uniclass",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "poupanca",
+                            "cliente":  "pf-investidor",
+                            "ndcg5":  0.91731941271295714,
+                            "ndcg8":  0.91731941271295714
+                        },
+                        {
+                            "q":  "seguro",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "cartao",
+                            "cliente":  "pf-sem-elegibilidade",
+                            "ndcg5":  0.90176547779728589,
+                            "ndcg8":  0.95702697527906611
+                        },
+                        {
+                            "q":  "bloquear",
+                            "cliente":  "pf-bloqueado",
+                            "ndcg5":  0.76028015264712978,
+                            "ndcg8":  0.76028015264712978
+                        },
+                        {
+                            "q":  "transfer",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "extrato",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "saldo",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "boleto",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "agendar",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  0.83312778079461358,
+                            "ndcg8":  0.83312778079461358
+                        },
+                        {
+                            "q":  "informe",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "tarifa",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "cet",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "pontos",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "contest",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "segunda via",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "capital",
+                            "cliente":  "pj-lojista",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "antecip",
+                            "cliente":  "pj-lojista",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "maquininha",
+                            "cliente":  "pj-lojista",
+                            "ndcg5":  1,
+                            "ndcg8":  1
+                        },
+                        {
+                            "q":  "conta pj",
+                            "cliente":  "pj-lojista",
+                            "ndcg5":  0.91731941271295714,
+                            "ndcg8":  0.91731941271295714
+                        },
+                        {
+                            "q":  "imobiliario",
+                            "cliente":  "pf-novo",
+                            "ndcg5":  0,
+                            "ndcg8":  0
+                        },
+                        {
+                            "q":  "veiculos",
+                            "cliente":  "pf-pix-recusado",
+                            "ndcg5":  0,
+                            "ndcg8":  0
+                        }
+                    ]
+}
