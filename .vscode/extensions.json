@@ -1,0 +1,18 @@
+{
+  "recommendations": [
+    // Java 25 + Maven + depuracao + executor de testes. Sem isto o projeto nem
+    // importa.
+    "vscjava.vscode-java-pack",
+
+    // Os scripts de verificacao, carga e avaliacao sao todos .ps1.
+    "ms-vscode.powershell",
+
+    // 'requisicoes/sugestoes.http' so e executavel com isto. Sem a extensao o
+    // arquivo abre como texto e o repositorio parece ter um formato morto.
+    "humao.rest-client",
+
+    // Dashboard do Spring Boot e navegacao de @Bean. Opcional, mas e o caminho
+    // mais curto entre abrir o projeto e ter a API no ar.
+    "vmware.vscode-boot-dev-pack"
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "version": "0.2.0",
+
+  // ---------------------------------------------------------------------------
+  // O segredo NUNCA entra neste arquivo: ele vem da variavel de ambiente do
+  // usuario, que o VSCode herda ao abrir. A aplicacao se recusa a subir sem ele,
+  // de proposito -- inclusive no perfil 'local' (ver application-local.properties).
+  //
+  // Se tudo der 401, ou a aplicacao nem subir: a variavel foi criada depois de o
+  // VSCode abrir. Feche e abra o VSCode, nao so o terminal.
+  //
+  // O perfil 'local' nao e opcional para desenvolver. Ele liga ?explicar=true, o
+  // gatilho manual de agregacao (em vez de esperar os 15 s do agendador), os
+  // prazos folgados e as origens de CORS dos empacotadores de front. Sem ele,
+  // 'verificar-comportamento.ps1' e a collection de exploracao nao tem como
+  // funcionar.
+  // ---------------------------------------------------------------------------
+
+  "configurations": [
+    {
+      "type": "java",
+      "name": "API na 8080 (perfil local)",
+      "request": "launch",
+      "mainClass": "dev.sugestao.busca.SugestaoBuscaApplication",
+      "projectName": "sugestao-busca",
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole",
+      "args": "--spring.profiles.active=local",
+      "env": {
+        "SUGESTAO_SEGREDO": "${env:SUGESTAO_SEGREDO}"
+      },
+      "vmArgs": "-Dfile.encoding=UTF-8"
+    },
+    {
+      // Para verificar alguma coisa sem derrubar o que ja esta na 8080.
+      // Os scripts de verificacao aceitam -Porta 8081.
+      "type": "java",
+      "name": "API na 8081 (segunda instancia, perfil local)",
+      "request": "launch",
+      "mainClass": "dev.sugestao.busca.SugestaoBuscaApplication",
+      "projectName": "sugestao-busca",
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole",
+      "args": "--spring.profiles.active=local --server.port=8081",
+      "env": {
+        "SUGESTAO_SEGREDO": "${env:SUGESTAO_SEGREDO}"
+      },
+      "vmArgs": "-Dfile.encoding=UTF-8"
+    },
+    {
+      // Como o repositorio entrega a aplicacao: sem o perfil 'local'. Serve para
+      // conferir que os defaults seguros sao os que viajam -- explicacao
+      // desligada, prazos de 18/8/30 ms, CORS fechado.
+      "type": "java",
+      "name": "API na 8080 (defaults do repositorio, SEM perfil local)",
+      "request": "launch",
+      "mainClass": "dev.sugestao.busca.SugestaoBuscaApplication",
+      "projectName": "sugestao-busca",
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole",
+      "env": {
+        "SUGESTAO_SEGREDO": "${env:SUGESTAO_SEGREDO}"
+      },
+      "vmArgs": "-Dfile.encoding=UTF-8"
+    },
+    {
+      // Liga o cache de perfil, que vem desligado por padrao. Serve para ver o
+      // ganho de leituras por sessao de digitacao -- e para reproduzir a
+      // regressao de read-after-write que ele causa, que
+      // 'verificar-comportamento.ps1' detecta e reporta saindo com codigo 2.
+      "type": "java",
+      "name": "API na 8081 com cache de perfil LIGADO",
+      "request": "launch",
+      "mainClass": "dev.sugestao.busca.SugestaoBuscaApplication",
+      "projectName": "sugestao-busca",
+      "cwd": "${workspaceFolder}",
+      "console": "internalConsole",
+      "args": "--spring.profiles.active=local --server.port=8081 --sugestao.cache-de-perfil.habilitado=true",
+      "env": {
+        "SUGESTAO_SEGREDO": "${env:SUGESTAO_SEGREDO}"
+      },
+      "vmArgs": "-Dfile.encoding=UTF-8"
+    }
+  ]
+}

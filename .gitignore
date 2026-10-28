@@ -30,7 +30,13 @@ build/
 !**/src/test/**/build/
 
 ### VS Code ###
-.vscode/
+# As tres primeiras sao portateis e valem para quem clonar: recomendacao de
+# extensao, como subir a API e as tarefas de verificacao. O settings.json fica
+# de fora porque carrega caminho absoluto do JDK desta maquina.
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 
 ### Ambiente local ###
 /solr-data/

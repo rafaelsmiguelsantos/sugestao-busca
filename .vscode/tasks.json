@@ -1,0 +1,123 @@
+{
+  "version": "2.0.0",
+
+  // Todas as tarefas herdam o JDK que settings.json declara, em vez de confiar
+  // no JAVA_HOME da maquina -- que aqui aponta para o JDK 17.
+  "options": {
+    "env": {
+      "JAVA_HOME": "${config:java.jdt.ls.java.home}"
+    }
+  },
+
+  "tasks": [
+    {
+      "label": "testes",
+      "detail": "A suite inteira. 200 testes, sem rede e sem Solr.",
+      "type": "shell",
+      "command": "./mvnw",
+      "windows": { "command": ".\\mvnw.cmd" },
+      "args": ["-B", "test"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "compilar",
+      "detail": "Compila sem rodar teste.",
+      "type": "shell",
+      "command": "./mvnw",
+      "windows": { "command": ".\\mvnw.cmd" },
+      "args": ["-B", "-q", "compile"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Solr: subir",
+      "detail": "Sobe o Solr local e cria a colecao se faltar. Precisa estar no ar antes da API.",
+      "type": "shell",
+      "command": ".\\scripts\\solr-local.ps1",
+      "args": ["start"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Solr: parar",
+      "type": "shell",
+      "command": ".\\scripts\\solr-local.ps1",
+      "args": ["stop"],
+      "problemMatcher": []
+    },
+    {
+      "label": "verificar comportamento",
+      "detail": "Prova afinidade, fadiga e gatilho de ponta a ponta. Exige a API no ar. Sai com codigo 2 se o cache de perfil estiver ligado.",
+      "type": "shell",
+      "command": ".\\requisicoes\\verificar-comportamento.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "avaliar ranking (NDCG)",
+      "detail": "Portao de regressao de ordem. Exige a API no ar. Sai com codigo 1 se a media cair.",
+      "type": "shell",
+      "command": ".\\scripts\\avaliar-ranking.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "avaliar ranking: autoteste",
+      "detail": "So a aritmetica do NDCG, com seis casos calculados a mao. Nao usa rede.",
+      "type": "shell",
+      "command": ".\\scripts\\avaliar-ranking.ps1",
+      "args": ["-Autoteste"],
+      "problemMatcher": []
+    },
+    {
+      "label": "newman: consumo (sessao de digitacao)",
+      "detail": "Simula um front consumindo a API. Exige a API no ar.",
+      "type": "shell",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "newman@6",
+        "run",
+        "./requisicoes/postman-front-typeahead.json",
+        "--env-var",
+        "segredo=${env:SUGESTAO_SEGREDO}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "newman: cadastro",
+      "detail": "Exercita o lado de escrita. ATENCAO: grava ofertas de teste no indice -- limpar depois.",
+      "type": "shell",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "newman@6",
+        "run",
+        "./requisicoes/postman-sugestao-busca.json",
+        "--env-var",
+        "segredo=${env:SUGESTAO_SEGREDO}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "limpar ofertas de teste do indice",
+      "detail": "Devolve o indice ao estado de 99 documentos, que e o que a linha de base do NDCG espera.",
+      "type": "shell",
+      "command": ".\\scripts\\limpar-ofertas-de-teste.ps1",
+      "args": ["-Confirmar"],
+      "problemMatcher": []
+    },
+    {
+      "label": "sondar (adversarial)",
+      "detail": "55 sondas de entrada hostil. Exige a API no ar.",
+      "type": "shell",
+      "command": ".\\requisicoes\\sondar.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "cacar teste instavel",
+      "detail": "Roda a suite repetidamente sob contencao de CPU.",
+      "type": "shell",
+      "command": ".\\scripts\\cacar-flaky.ps1",
+      "problemMatcher": []
+    }
+  ]
+}
