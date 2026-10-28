@@ -15,7 +15,7 @@ motivo de cada ausência registrado.
 |---|---|
 | **chamar a API** | [`docs/guia-api.md`](docs/guia-api.md) — guia de integração em 10 passos |
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
-| clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 36 requisições em 7 pastas |
+| clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 40 requisições em 8 pastas |
 | entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 28 decisões, com o que foi **recusado** e por quê |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
@@ -239,10 +239,10 @@ oferta, a tabela de códigos e a lista de armadilhas de front-end.
 
 | forma | para quê |
 |---|---|
-| [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) | **comece aqui**: 36 requisições em 7 pastas, para clicar e ler |
+| [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) | **comece aqui**: 40 requisições em 8 pastas, para clicar e ler |
 | [`requisicoes/sugestoes.http`](requisicoes/sugestoes.http) | REST Client do VS Code, agrupado por pergunta |
 | [`requisicoes/bater.ps1`](requisicoes/bater.ps1) | terminal, sem extensão nenhuma |
-| [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json) | newman, 56 asserções sobre o **cadastro** — para CI |
+| [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json) | newman, 60 asserções sobre o **cadastro** — para CI |
 | [`requisicoes/postman-front-typeahead.json`](requisicoes/postman-front-typeahead.json) | newman, 160 asserções sobre o **consumo**: uma sessão de digitação |
 
 A collection de exploração assina os próprios tokens; só cole o seu
@@ -331,7 +331,7 @@ agrupados por pergunta, e cada um explica o que olhar na resposta.
 
 **No Postman, para clicar e explorar** —
 [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json).
-`File > Import` e pronto: **36 requisições em 7 pastas**, cada uma com uma
+`File > Import` e pronto: **40 requisições em 8 pastas**, cada uma com uma
 descrição em markdown dizendo o que olhar na resposta. Não pede token: um
 `prerequest` de collection assina os JWTs a cada envio com o CryptoJS que o
 Postman embute, e cada requisição declara o seu na aba *Authorization* — onde dá
@@ -357,7 +357,7 @@ pasta 3 grava ficam no índice e saem com
 
 **No newman, para CI** —
 [`requisicoes/postman-sugestao-busca.json`](requisicoes/postman-sugestao-busca.json),
-com **56 asserções** sobre o contrato público. Roda sem instalar nada permanente:
+com **60 asserções** sobre o contrato público. Roda sem instalar nada permanente:
 
 ```powershell
 npx --yes newman@6 run .\requisicoes\postman-sugestao-busca.json
@@ -1184,8 +1184,8 @@ requisicoes/bater.ps1          os mesmos cenários no terminal, sem extensão
 requisicoes/sondar.ps1         55 sondas adversariais em 6 grupos
 requisicoes/verificar-comportamento.ps1   afinidade de produto e fadiga, ao vivo
 requisicoes/demonstrar.ps1     roteiro de apresentação em oito atos
-requisicoes/postman-exploracao.json       36 requisições em 7 pastas, para clicar
-requisicoes/postman-sugestao-busca.json   cadastro: 56 asserções (newman)
+requisicoes/postman-exploracao.json       40 requisições em 8 pastas, para clicar
+requisicoes/postman-sugestao-busca.json   cadastro: 60 asserções (newman)
 requisicoes/postman-front-typeahead.json  consumo: 160 asserções, uma sessão de digitação
 
 avaliacao/julgamentos.json     32 consultas julgadas, para medir a ORDEM da lista

@@ -716,6 +716,130 @@
           ]}}]
         }
       ]
+    },
+    {
+      "name": "8 - A lista resgatada",
+      "description": "A etapa **Recuperar**, a sexta do fluxo.\n\nA pasta 2 mostra ofertas *desaparecendo* por condicao do cliente. Esta mostra o que entra no lugar: quando a lista esvazia por um dos quatro motivos **condicionais do cliente** -- `SEM_ELEGIBILIDADE`, `CONTA_INADIMPLENTE`, `CONTA_NAO_OPERANTE`, `PRODUTO_JA_CONTRATADO` -- entra **uma** linha da jornada, de origem `SUBSTITUTO`.\n\nTres coisas para observar na ordem:\n\n1. a linha aparece, e **nao e oferta** (`ofertaId` vazio, `relevancia` 0.0, sem `melhorOferta`);\n2. ela e a **mesma** para motivos diferentes -- e e isso que impede a resposta de contar qual restricao reprovou o cliente;\n3. ela **nao** aparece quando a busca simplesmente nao achou nada.",
+      "item": [
+        {
+          "name": "a) 'veiculos': a oferta sai, e a jornada responde",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_pix_recusado}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=veiculos&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "veiculos" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "Dois defeitos somados, e o conserto do segundo.\n\n**Um:** `veiculos` no plural nao casa por prefixo -- o EdgeNGram grava os *comecos* de `veiculo`, e `veiculos` tem uma letra a mais. Nao ha stemmer. Quem salva e a tolerancia a erro de digitacao, por acidente: distancia 1 entre `veiculos` e `veiculo`.\n\n**Dois:** o documento recuperado e uma **oferta** que exige elegibilidade, e nenhum perfil de demonstracao tem elegibilidade de financiamento. A Peneira a remove com `SEM_ELEGIBILIDADE` -- e esta certa, porque oferecer o que o cliente nao pode contratar e problema de conduta, nao so frustracao.\n\nAntes da etapa Recuperar isto devolvia **lista vazia**. Agora devolve `simular credito`.\n\nVeja na `explicacao` o descarte com o motivo, e em `itens` a linha que entrou no lugar."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const corpo = pm.response.json();",
+            "",
+            "pm.test('entrou exatamente uma linha de origem SUBSTITUTO', function () {",
+            "    pm.expect(corpo.itens.filter(i => i.origem === 'SUBSTITUTO').length).to.eql(1);",
+            "});",
+            "",
+            "// Tratar a substituta como oferta e o erro que o front comete. Ela nao",
+            "// tem identificador, nao tem produto, e nasce com relevancia 0.0 --",
+            "// que e o jeito de dizer 'esta linha nunca foi pontuada pelo indice'.",
+            "pm.test('ela NAO e oferta: sem ofertaId, relevancia 0.0, sem melhorOferta', function () {",
+            "    const sub = corpo.itens.find(i => i.origem === 'SUBSTITUTO');",
+            "    pm.expect(sub.ofertaId, 'substituta com ofertaId').to.eql('');",
+            "    pm.expect(sub.relevancia, 'substituta pontuada').to.eql(0);",
+            "    pm.expect(corpo.melhorOferta, 'substituta virou melhorOferta').to.be.undefined;",
+            "});",
+            "",
+            "pm.test('a explicacao mostra o descarte que a motivou', function () {",
+            "    const motivos = corpo.explicacao.descartes.map(d => d.motivo);",
+            "    pm.expect(motivos).to.include('SEM_ELEGIBILIDADE');",
+            "});",
+            "",
+            "console.log('--- a lista resgatada ---');",
+            "corpo.itens.forEach(i => console.log('  ' + i.origem.padEnd(12) + i.termo + '   -> ' + i.destino));"
+          ]}}]
+        },
+        {
+          "name": "b) 'imobiliario': outro cliente, outra jornada de produto, MESMA linha",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=imobiliario&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "imobiliario" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "**Compare com a requisicao anterior.** Cliente diferente, produto diferente, e a linha devolvida e a mesma: `simular credito`.\n\nNao e descuido -- e a regra de privacidade do recurso, e ela esta no **tipo**. A assinatura do metodo que escolhe a linha recebe a *jornada* e **nao recebe o motivo**. Nao ha como a linha variar com a restricao que reprovou o cliente, porque o codigo que a escolhe nao sabe qual foi.\n\nSe variasse, a resposta contaria a quem sondasse a API de proposito: *\"este cliente foi reprovado por inadimplencia\"* contra *\"este foi por falta de elegibilidade\"*. Um canal lateral de dado de credito, aberto pelo recurso que existia para melhorar a experiencia.\n\nHa um teste de unidade que passa os quatro motivos condicionais e exige a mesma linha nos quatro."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const corpo = pm.response.json();",
+            "",
+            "pm.test('a mesma jornada devolve a mesma linha', function () {",
+            "    const sub = corpo.itens.find(i => i.origem === 'SUBSTITUTO');",
+            "    pm.expect(sub, 'nao houve substituta').to.not.be.undefined;",
+            "    pm.expect(sub.termo).to.eql('simular credito');",
+            "});",
+            "",
+            "// A assercao que vale: nada no que sai nomeia a restricao.",
+            "pm.test('a substituta nao revela qual restricao reprovou o cliente', function () {",
+            "    const sub = corpo.itens.find(i => i.origem === 'SUBSTITUTO');",
+            "    const texto = JSON.stringify(sub).toUpperCase();",
+            "    ['INADIMPL', 'ELEGIB', 'BLOQUE', 'CONTRATAD', 'ATRASO', 'RECUSAD', 'NEGAD']",
+            "        .forEach(p => pm.expect(texto, 'a substituta vazou: ' + p).to.not.include(p));",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "c) 'xpto9988': nada casou, e aqui a lista continua vazia",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=xpto9988&explicar=true",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "xpto9988" }, { "key": "explicar", "value": "true" }]
+            },
+            "description": "**O limite do recurso, e ele importa mais que o recurso.**\n\nA substituta nao e linha de preenchimento. Prefixo que nao casou documento nenhum **continua** devolvendo lista vazia, porque nao existe jornada a substituir -- inventar uma seria devolver algo que ninguem procurou.\n\nE a distincao que a etapa Recuperar faz, e que nada mais no sistema fazia: *\"nao ha nada\"* e *\"ha, e esta pessoa nao pode\"* produziam a mesma lista vazia.\n\nDuas outras situacoes tambem voltam vazias:\n\n- descarte por `ABAIXO_DO_PISO`. De proposito: a **presenca** da linha substituta ja anunciaria *\"havia algo aqui, e pouca gente buscou\"*, que e exatamente o que o piso de k-anonimato existe para esconder;\n- jornada sem linha declarada em `sugestao.recuperacao.linhas`. As oito declaradas sao credito, cartao, conta, investimento, pix, pj, renegociacao e seguros."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const corpo = pm.response.json();",
+            "",
+            "pm.test('lista vazia, e sem substituta: nao havia o que substituir', function () {",
+            "    pm.expect(corpo.itens).to.be.an('array').that.is.empty;",
+            "});",
+            "",
+            "// Lista vazia nunca e erro. Uma caixa de busca que devolve 500 enquanto",
+            "// a pessoa digita e pior do que uma que devolve nada.",
+            "pm.test('e continua sendo 200, nao erro', function () {",
+            "    pm.response.to.have.status(200);",
+            "});"
+          ]}}]
+        },
+        {
+          "name": "d) o charset esta declarado -- no sucesso E no erro",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token_pf_novo}}", "type": "string" }] },
+            "method": "GET", "header": [],
+            "url": {
+              "raw": "{{host}}/v1/sugestoes?q=emprestim",
+              "host": ["{{host}}"], "path": ["v1", "sugestoes"],
+              "query": [{ "key": "q", "value": "emprestim" }]
+            },
+            "description": "Olhe o cabecalho **Content-Type** na aba Headers da resposta.\n\n`application/json;charset=UTF-8`. Pelo RFC, omitir o charset ja significaria UTF-8 -- mas cliente nenhum le o RFC, e varios caem em ISO-8859-1.\n\nIsto foi um defeito real aqui, e o sintoma nao parecia ser de encoding: o avaliador de ranking em PowerShell recebeu `emprÃ©stimo` em todo termo acentuado e a nota medida caiu de **0,89 para 0,56**. Um defeito de charset vestido de regressao de ranking.\n\nE a primeira correcao cobriu **so o caminho de sucesso**. `ProblemDetail` nao passa pelos conversores de mensagem -- o Spring escolhe o tipo dele a partir de uma constante, e essa escolha vence a lista de tipos suportados. Resultado: a inconsistencia tinha *mudado de lugar*, e o que ficou de fora foi o **422**, a resposta mais cheia de texto acentuado do servico.\n\nHoje os **oito** caminhos de resposta declaram o charset. A requisicao *Cadastro invalido* da pasta 5 mostra o lado do erro."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('sucesso declara charset=UTF-8', function () {",
+            "    pm.expect(pm.response.headers.get('Content-Type')).to.match(/charset=UTF-8/i);",
+            "});",
+            "",
+            "// Se o charset voltar a faltar, o sintoma aparece aqui antes de aparecer",
+            "// como 'regressao de ranking' no portao de NDCG.",
+            "pm.test('e o acento chega inteiro', function () {",
+            "    pm.expect(pm.response.text()).to.not.match(/Ã.|â€/);",
+            "});"
+          ]}}]
+        }
+      ]
     }
   ]
 }

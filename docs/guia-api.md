@@ -564,8 +564,8 @@ p50 de 8–10 ms e p99 da ordem de 30 ms; entre 530 e 680 req/s com 40 chamadas
 falha, em 400 requisições. Cliente, serviço e índice na mesma máquina — serve para
 comparar mudanças, **não para dimensionar capacidade**.
 
-Verificado: 200 testes de unidade; **216 asserções de contrato por HTTP de
-verdade** — 56 sobre o cadastro
+Verificado: 200 testes de unidade; **220 asserções de contrato por HTTP de
+verdade** — 60 sobre o cadastro
 ([`postman-sugestao-busca.json`](../requisicoes/postman-sugestao-busca.json)) e
 160 sobre o consumo
 ([`postman-front-typeahead.json`](../requisicoes/postman-front-typeahead.json),

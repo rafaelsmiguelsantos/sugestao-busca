@@ -432,8 +432,9 @@ HTTP 429  application/problem+json
         <strong>A linha substituta não diz por que a oferta saiu, e isso é de propósito.</strong> Ela
         é função da <em>jornada</em> pedida, nunca do motivo do descarte — se variasse com o motivo,
         a resposta contaria a quem sondasse a API qual restrição reprovou aquele cliente. Então não
-        tente inferir elegibilidade a partir dela: a mesma linha sai para conta em atraso, falta de
-        elegibilidade, conta inativa e oferta fora de vigência.
+        tente inferir elegibilidade a partir dela: a mesma linha sai para os quatro motivos
+        condicionais — <code>CONTA_INADIMPLENTE</code>, <code>SEM_ELEGIBILIDADE</code>,
+        <code>CONTA_NAO_OPERANTE</code> e <code>PRODUTO_JA_CONTRATADO</code>.
       </div>
 
       <div class="nota">
@@ -880,8 +881,8 @@ Authorization: Bearer $TOKEN_DO_CLIENTE
       máquina — serve para comparar mudanças, não para dimensionar capacidade.
     </p>
     <p>
-      Verificado: 200 testes de unidade, <strong>216 asserções de contrato por HTTP de verdade</strong>
-      — 56 sobre o cadastro e 160 sobre o consumo, estas simulando uma sessão de digitação — e 55
+      Verificado: 200 testes de unidade, <strong>220 asserções de contrato por HTTP de verdade</strong>
+      — 60 sobre o cadastro e 160 sobre o consumo, estas simulando uma sessão de digitação — e 55
       sondas adversariais, mais um caçador de teste instável que roda a suíte sob contenção de CPU —
       <code>scripts/cacar-flaky.ps1</code>. Três asserções deste projeto afirmavam igualdade exata
       sobre valor decaído e passavam por sorte; a última só apareceu com os doze núcleos ocupados.

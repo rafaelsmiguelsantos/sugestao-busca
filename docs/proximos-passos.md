@@ -12,7 +12,7 @@
 | | |
 |---|---|
 | **feito e verificado** | busca com perfil, cadastro por jornada, caminho de escrita, autenticação, resiliência, tolerância a erro de digitação, três sinais de comportamento, medição de qualidade, limite de taxa, linha substituta, **avaliação de ordem (NDCG)**, cache de perfil por sessão |
-| **medido** | 530–680 req/s · p50 8–10 ms · p99 ~30 ms · 200 testes · 216 asserções de contrato · 55 sondas sem achados · **NDCG@5 de 0,9116 em 32 consultas** |
+| **medido** | 530–680 req/s · p50 8–10 ms · p99 ~30 ms · 200 testes · 220 asserções de contrato · 55 sondas sem achados · **NDCG@5 de 0,9116 em 32 consultas** |
 | **em memória, de propósito** | fila de eventos, agregação, perfil |
 | **não existe** | aprendizado de máquina |
 
