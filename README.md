@@ -17,6 +17,7 @@ motivo de cada ausência registrado.
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 40 requisições em 8 pastas |
 | entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 29 decisões, com o que foi **recusado** e por quê |
+| **entender a pontuação** | [`docs/pontuacao-do-ranking.md`](docs/pontuacao-do-ranking.md) — a fórmula, os seis sinais, um exemplo à mão |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 | ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
@@ -72,10 +73,10 @@ entraria um job de janela deslizante. Os limites estão listados em
 | | versão mínima | nota |
 |---|---|---|
 | **JDK** | 21 — testado em **Temurin 25** | o Solr 10 exige 21+; o projeto compila com `--release 25` |
-| **Apache Solr** | 10.0.0 | os scripts baixam e sobem a partir do zip, sem admin |
+| **Apache Solr** | 10.0.0 | via `docker compose`, que não exige instalar nada |
 | **Maven** | — | via `mvnw`, baixado na primeira build |
 | **PowerShell** | 5.1 | os scripts são compatíveis com o que vem no Windows |
-| **Docker** | opcional | para o **DynamoDB** (perfil durável) e, se quiser, o Solr em container |
+| **Docker** | recomendado | sobe Solr e DynamoDB; é o caminho verificado deste README |
 
 No Windows, a política de execução padrão é `Restricted` e nenhum `.ps1` roda.
 Uma vez só, em terminal normal, sem admin:
@@ -99,13 +100,16 @@ cd sugestao-busca
 #     sem esta variável a aplicação recusa subir, de propósito.
 $env:SUGESTAO_SEGREDO = 'troque-isto-por-ao-menos-32-bytes-proprios'
 
-# 3 · Solr: baixa, sobe, cria a coleção e aplica o schema
-.\scripts\solr-local.ps1 start
+# 3 · Solr e DynamoDB; depois a coleção, o schema e o vocabulário
+docker compose up -d                    # as tabelas nascem com a aplicação
 .\scripts\criar-colecao.ps1
 .\scripts\semear-vocabulario.ps1        # vocabulário sintético + catálogo
 
-# 4 · (opcional) DynamoDB, para o perfil NÃO morrer no restart
-docker compose up -d dynamodb      # a aplicação cria as tabelas ao subir
+# 4 · sem Docker? o Solr do zip, instalado à parte — o script NÃO baixa nada.
+#     Aponte a instalação, rode isto em lugar do 'docker compose up -d' do
+#     passo 3, e perca só o DynamoDB (veja a nota abaixo).
+#     $env:SOLR_INSTALL = '<pasta do solr-10.0.0>'
+#     .\scripts\solr-local.ps1 start
 
 # 5 · a aplicação, no perfil de demonstração
 $env:JAVA_HOME = '<caminho do seu JDK 25>'
@@ -118,7 +122,8 @@ curl.exe -s "http://localhost:8080/v1/sugestoes?q=consignad&explicar=true" `
 ```
 
 Saúde em <http://localhost:8080/actuator/health>, painel do Solr em
-<http://localhost:8983/solr>. Para derrubar o Solr:
+<http://localhost:8983/solr>. Para derrubar: `docker compose down` preserva os
+volumes, `docker compose down -v` descarta índice e tabelas. No caminho do zip,
 `.\scripts\solr-local.ps1 stop`.
 
 > **Por que o perfil `local`.** Ele liga `?explicar=true`, o gatilho manual de
@@ -126,12 +131,13 @@ Saúde em <http://localhost:8080/actuator/health>, painel do Solr em
 > front-end e **liga o DynamoDB**. O perfil padrão não liga nada disso — o default
 > que viaja no repositório é o seguro, e ligar é decisão de quem roda.
 
-> **O passo 4 é opcional, e o que muda sem ele.** Sem o DynamoDB a aplicação sobe
+> **O DynamoDB é opcional, e o que muda sem ele.** Sem o DynamoDB a aplicação sobe
 > igual, com perfil, fila e agregados em memória — e **reiniciar apaga o que foi
 > aprendido**. Com ele, afinidade, tendência, fadiga e o log de eventos
 > sobrevivem; medido, o aprendizado volta byte a byte depois do restart. Para
 > rodar sem o container mesmo no perfil `local`:
-> `--sugestao.dynamo.habilitado=false`.
+> `--sugestao.dynamo.habilitado=false`. Para subir só o Solr:
+> `docker compose up -d solr`.
 >
 > O custo também está medido: a leitura do perfil sai de um `HashMap` para rede, e
 > com o orçamento de produção de 8 ms **48 % das listas saem degradadas** — ou
@@ -270,6 +276,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
 | [`docs/decisoes.md`](docs/decisoes.md) | 29 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/pontuacao-do-ranking.md`](docs/pontuacao-do-ranking.md) | **como a pontuação é calculada** — técnico e de negócio, com exemplo à mão |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
@@ -299,8 +306,25 @@ e não sabe se do outro lado está o zip ou o container. Trocar de um para o out
 não muda nada no projeto, mas **os dois não sobem juntos**: disputam a porta 8983.
 Antes de subir o container, `.\scripts\solr-local.ps1 stop`.
 
-Uma ressalva honesta: tudo o que está neste README foi verificado contra o Solr
-do zip. O caminho do container está escrito e nunca foi executado.
+O caminho do container **passou a ser executado**, e a primeira execução achou o
+defeito que ele tinha desde que foi escrito: o `compose.yaml` subia o Solr com
+`solr-precreate`, que termina em `exec solr-fg --user-managed` e portanto força o
+modo autogerido. Nesse modo a API de coleções responde
+`400 "Solr instance is not running in SolrCloud mode"` — e é a única API que o
+`criar-colecao.ps1` fala. O `command` agora é `solr-foreground`, sem argumento,
+que no Solr 10 já é SolrCloud.
+
+A ressalva que fica é mais estreita do que era: os números de **latência** deste
+README foram medidos contra o Solr do zip e não foram remedidos no container. O
+NDCG foi: no container a avaliação deu `@5=0,9116` e `@8=0,9138`, delta `0,0000`
+contra a linha de base levantada no zip — o mesmo corpus dá a mesma ordem nos
+dois caminhos.
+
+Um stacktrace no primeiro arranque **não** é defeito: o `AgregadosComLogDuravel`
+tenta reler o log durável antes de a tabela de eventos existir e despeja um
+`ResourceNotFoundException` inteiro no log. A linha seguinte é
+`log duravel nao pôde ser relido; a aplicacao sobe com a janela vazia`, e numa
+base nova não há mesmo nada para reler.
 
 ### Semear e conferir
 
@@ -1190,6 +1214,7 @@ src/main/java/dev/sugestao/busca/
     └── SugestaoProperties         todo numero discutivel, num lugar
 
 docs/decisoes.md               as decisões, com o que foi recusado e por quê
+docs/pontuacao-do-ranking.md   a formula do ranking, passo a passo, com exemplo
 docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respostas
 docs/guia-api.html             guia de integração em 10 passos (abre no navegador)
 

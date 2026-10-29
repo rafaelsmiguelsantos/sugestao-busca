@@ -10,7 +10,7 @@
         .\requisicoes\bater.ps1 -Lista               # quais existem
 
     Precisa do app no ar com o perfil 'local':
-        $env:JAVA_HOME='C:\Users\migue\tools\jdk-25'
+        $env:JAVA_HOME='<caminho do seu JDK 25>'
         .\mvnw spring-boot:run "-Dspring-boot.run.profiles=local"
 #>
 [CmdletBinding()]

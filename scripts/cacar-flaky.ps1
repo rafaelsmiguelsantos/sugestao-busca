@@ -35,10 +35,16 @@ param(
     # dependencia de ordem. O surefire aceita 'random' ou 'alphabetical'.
     [switch] $Ordem,
 
-    [string] $JavaHome = 'C:\Users\migue\tools\jdk-25'
+    # Vem do ambiente. O projeto compila com --release 25, entao isto precisa
+    # apontar para um JDK 25 -- nao para o JDK padrao da maquina, se for outro.
+    [string] $JavaHome = $env:JAVA_HOME
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $JavaHome) {
+    throw "Nao sei qual JDK usar: JAVA_HOME nao esta definido. Aponte -JavaHome para um JDK 25."
+}
+if (-not (Test-Path $JavaHome)) { throw "JDK nao encontrado em $JavaHome." }
 $env:JAVA_HOME = $JavaHome
 
 $raiz = Split-Path -Parent $PSScriptRoot
