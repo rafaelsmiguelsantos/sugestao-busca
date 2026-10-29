@@ -17,6 +17,7 @@ motivo de cada ausência registrado.
 | **rodar na sua máquina** | [Começar](#começar) — cinco passos |
 | clicar e explorar | [`requisicoes/postman-exploracao.json`](requisicoes/postman-exploracao.json) — 40 requisições em 8 pastas |
 | entender as escolhas | [`docs/decisoes.md`](docs/decisoes.md) — 29 decisões, com o que foi **recusado** e por quê |
+| **entender a pontuação** | [`docs/pontuacao-do-ranking.md`](docs/pontuacao-do-ranking.md) — a fórmula, os seis sinais, um exemplo à mão |
 | integrar um front-end | [`docs/cliente-web.md`](docs/cliente-web.md) — React e Angular, CORS, debounce |
 | saber o que não funciona | [Limitações conhecidas](#limitações-conhecidas) |
 | ver a demonstração | `.\requisicoes\demonstrar.ps1` — oito atos, com verificação prévia |
@@ -275,6 +276,7 @@ A collection de exploração assina os próprios tokens; só cole o seu
 |---|---|
 | [`docs/guia-api.md`](docs/guia-api.md) | **como chamar a API**, em dez passos |
 | [`docs/decisoes.md`](docs/decisoes.md) | 29 decisões de desenho, com o que foi **recusado** e por quê |
+| [`docs/pontuacao-do-ranking.md`](docs/pontuacao-do-ranking.md) | **como a pontuação é calculada** — técnico e de negócio, com exemplo à mão |
 | [`docs/cliente-web.md`](docs/cliente-web.md) | React e Angular: CORS, debounce, resposta fora de ordem |
 | [`docs/proximos-passos.md`](docs/proximos-passos.md) | o roteiro adiante, com o motivo de cada posição na ordem |
 | [`solr/README.md`](solr/README.md) | por que cada campo do índice existe |
@@ -1212,6 +1214,7 @@ src/main/java/dev/sugestao/busca/
     └── SugestaoProperties         todo numero discutivel, num lugar
 
 docs/decisoes.md               as decisões, com o que foi recusado e por quê
+docs/pontuacao-do-ranking.md   a formula do ranking, passo a passo, com exemplo
 docs/cliente-web.md            React e Angular: CORS, debounce, ordem das respostas
 docs/guia-api.html             guia de integração em 10 passos (abre no navegador)
 
